@@ -1,12 +1,11 @@
 from fit_tool.fit_file import FitFile
 
 
-
 # path = r'C:\Users\tt_ro\Nextcloud\Gadgetbridge\files'
-path = "Solo_Spinning_Not_So_Back.fit"
+path = "Lunch_Swim.fit"
 fit_file = FitFile.from_file(path)
 
-out_path = 'test.csv'
+out_path = "test.csv"
 fit_file.to_csv(out_path)
 
 for record in fit_file.records:
@@ -16,19 +15,14 @@ for record in fit_file.records:
         # print(message.get_field_definition(SessionSportField.ID)))
 
 
-
-
 # from fit_tool.profile.messages.record_message import RecordMessage, RecordHeartRateField, RecordPowerField
 # from fit_tool.profile.messages.activity_message import ActivityMessage
 
 from fit_tool.profile.messages.session_message import SessionMessage, SessionSportField
+
 SessionMessage.ID
 # ActivityMessage.ID
 # RecordMessage.ID
-
-
-
-
 
 
 # from fit_tool.fit_file import FitFile

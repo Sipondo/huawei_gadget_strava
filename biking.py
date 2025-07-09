@@ -12,6 +12,11 @@ df_summary = pd.read_sql_table("HUAWEI_WORKOUT_SUMMARY_SAMPLE", engine)
 
 ds_summary = df_summary.iloc[-1]
 
+
+print(
+    f"Workout: {ds_summary["WORKOUT_NUMBER"]} | Workout ID: {ds_summary['WORKOUT_ID']}"
+)
+
 df_data = pd.read_sql_query(
     f"SELECT * FROM HUAWEI_WORKOUT_DATA_SAMPLE WHERE WORKOUT_ID = {ds_summary['WORKOUT_ID']}",
     engine,
