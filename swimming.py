@@ -28,7 +28,7 @@ df_heart_data = pd.read_sql_query(
 df_segment_data = pd.read_sql_query(
     f"SELECT * FROM HUAWEI_WORKOUT_SWIM_SEGMENTS_SAMPLE WHERE WORKOUT_ID = {workout_id} AND TYPE = 0",
     engine,
-).groupby("SEGMENT").first()
+).groupby("SEGMENT").first().reset_index(drop=True)
 # TODO: figure out what the type = 1 data means
 
 df_heart_data = df_heart_data[["TIMESTAMP", "HEART_RATE"]]
@@ -52,6 +52,7 @@ from fit_tool.profile.messages.file_id_message import FileIdMessage
 from fit_tool.profile.messages.device_info_message import DeviceInfoMessage
 from fit_tool.profile.messages.activity_message import ActivityMessage
 from fit_tool.profile.messages.length_message import LengthMessage
+from fit_tool.profile.messages.lap_message import LapMessage
 from fit_tool.fit_file_builder import FitFileBuilder
 from fit_tool.profile.messages.record_message import (
     RecordMessage,
@@ -81,15 +82,20 @@ message.timestamp = int(ds_summary["START_TIMESTAMP"] * 1000)
 builder.add(message)
 
 ### Swimming data
+lap_time = 0
+lap_distance = 0
 
+
+# TODO: add first two ghost lengths
 start_time = int(ds_summary["START_TIMESTAMP"] * 1000)
 for index, row in df_segment_data.iterrows():
     message = LengthMessage()
     message.timestamp = int(ds_summary["START_TIMESTAMP"] * 1000)
     message.start_time = start_time
-    start_time += int(row["TIME"]) * 1000
     message.total_elapsed_time = int(row["TIME"])
     message.total_timer_time = int(row["TIME"])
+    lap_time += int(row["TIME"])
+    lap_distance += 25
     message.message_index = int(index)
     message.total_strokes = int(row["STROKES"])
     message.avg_speed = row["DISTANCE"] / row["TIME"]                  
@@ -100,7 +106,22 @@ for index, row in df_segment_data.iterrows():
     message.event_group = 255
     message.length_type = 1
     builder.add(message)
+    
+    if not index % 4:
+        message = LapMessage()
+        message.timestamp = int(ds_summary["START_TIMESTAMP"] * 1000)
+        message.start_time = start_time
+        message.total_elapsed_time = lap_time
+        message.total_distance = lap_distance
+        message.total_timer_time = lap_time
+        lap_time = 0
+        lap_distance = 0
+        # total cycles
+        # total work
+        # total_moving_time,4,bytes,time_standing,4,bytes,avg_left_power_phase,4,bytes,avg_left_power_phase_peak,4,bytes,avg_right_power_phase,4,bytes,avg_right_power_phase_peak,4,bytes,avg_power_position,4,bytes,max_power_position,4,bytes,enhanced_avg_speed,4,bytes,enhanced_max_speed,4,bytes,enhanced_avg_altitude,4,bytes,enhanced_min_altitude,4,bytes,enhanced_max_altitude,4,bytes,message_index,2,bytes,total_calories,2,bytes,total_fat_calories,2,bytes,avg_speed,2,bytes,max_speed,2,bytes,avg_power,2,bytes,max_power,2,bytes,total_ascent,2,bytes,total_descent,2,bytes,num_lengths,2,bytes,normalized_power,2,bytes,left_right_balance,2,bytes,first_length_index,2,bytes,avg_stroke_distance,2,bytes,num_active_lengths,2,bytes,wkt_step_index,2,bytes,avg_vertical_oscillation,2,bytes,avg_stance_time_percent,2,bytes,avg_stance_time,2,bytes,stand_count,2,bytes,avg_vertical_ratio,2,bytes,avg_stance_time_balance,2,bytes,avg_step_length,2,bytes,event,1,bytes,event_type,1,bytes,avg_heart_rate,1,bytes,max_heart_rate,1,bytes,avg_cadence,1,bytes,max_cadence,1,bytes,intensity,1,bytes,lap_trigger,1,bytes,sport,1,bytes,event_group,1,bytes,swim_stroke,1,bytes,sub_sport,1,bytes,avg_temperature,1,bytes,max_temperature,1,bytes,avg_fractional_cadence,1,bytes,max_fractional_cadence,1,bytes,total_fractional_cycles,1,bytes,avg_left_torque_effectiveness,1,bytes,avg_right_torque_effectiveness,1,bytes,avg_left_pedal_smoothness,1,bytes,avg_right_pedal_smoothness,1,bytes,avg_combined_pedal_smoothness,1,bytes,avg_left_pco,1,bytes,avg_right_pco,1,bytes,avg_cadence_position,2,bytes,max_cadence_position,2,bytes
+        builder.add(message)
 
+    start_time += int(row["TIME"]) * 1000
 
 ### Swimming end
 
