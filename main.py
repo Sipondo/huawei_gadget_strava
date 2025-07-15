@@ -1,4 +1,5 @@
 from fit_tool.fit_file import FitFile
+from fit_tool.profile.messages.session_message import SessionMessage, SessionSportField
 
 
 # path = r'C:\Users\tt_ro\Nextcloud\Gadgetbridge\files'
@@ -18,7 +19,6 @@ for record in fit_file.records:
 # from fit_tool.profile.messages.record_message import RecordMessage, RecordHeartRateField, RecordPowerField
 # from fit_tool.profile.messages.activity_message import ActivityMessage
 
-from fit_tool.profile.messages.session_message import SessionMessage, SessionSportField
 
 SessionMessage.ID
 # ActivityMessage.ID
