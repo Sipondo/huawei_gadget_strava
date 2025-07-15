@@ -30,6 +30,7 @@ df_segment_data = pd.read_sql_query(
     engine,
 ).groupby("SEGMENT").first().reset_index(drop=True)
 # TODO: figure out what the type = 1 data means
+# TODO: add pool length as data to session message
 
 df_heart_data = df_heart_data[["TIMESTAMP", "HEART_RATE"]]
 df_heart_data.loc[df_heart_data["HEART_RATE"] < 0, "HEART_RATE"] += 255
