@@ -2,6 +2,7 @@ import pandas as pd
 from sqlalchemy import create_engine
 
 SPEED = 34
+TARGET_DISTANCE = 100
 
 path = r"C:\Users\tt_ro\Nextcloud\Gadgetbridge\db"
 # path = r"C:\Users\Ties Robroek\Nextcloud\Gadgetbridge\db"
@@ -16,7 +17,7 @@ df_workout_ids = pd.read_sql_query(
 )
 
 
-workout_id = int(df_workout_ids.iloc[-1, 0])
+workout_id = int(df_workout_ids.iloc[-2, 0])
 
 ds_summary = df_summary.set_index("WORKOUT_ID").loc[workout_id]
 
@@ -29,8 +30,52 @@ df_segment_data = pd.read_sql_query(
     f"SELECT * FROM HUAWEI_WORKOUT_SWIM_SEGMENTS_SAMPLE WHERE WORKOUT_ID = {workout_id} AND TYPE = 0",
     engine,
 ).groupby("SEGMENT").first().reset_index(drop=True)
+
+df_segment_data.drop(["SEGMENT_INDEX"], inplace=True, axis=1)
+# Fix missing segments
+if df_segment_data.loc[0, "TIME"] > 2 * df_segment_data.loc[1, "TIME"]:
+    segment_time  = df_segment_data.loc[0, "TIME"] // 3
+    df_segment_data.index += 2
+    df_segment_data.loc[0] = df_segment_data.loc[2]
+    df_segment_data.loc[1] = df_segment_data.loc[2]
+
+    df_segment_data.sort_index(inplace=True)
+
+    df_segment_data.loc[0, "TIME"] -= (segment_time * 2)
+    df_segment_data.loc[1, "TIME"] = segment_time
+    df_segment_data.loc[2, "TIME"] = segment_time
+
+# Add laps
+
+i = 0
+while i < len(df_segment_data) - 1:
+    if df_segment_data.loc[i, "TIME"] > 2 * df_segment_data.loc[i+1, "TIME"]:
+        pre_segment = df_segment_data.loc[i]
+        post_segment = df_segment_data.loc[i+1]
+
+        df_segment_data.index = [(val if val < i else val+1) for val in range(len(df_segment_data))]
+        df_segment_data.loc[i] = pre_segment
+        df_segment_data.sort_index(inplace=True)
+
+        df_segment_data.loc[i, "TIME"] = pre_segment["TIME"] - post_segment["TIME"]
+        df_segment_data.loc[i+1, "TIME"] = post_segment["TIME"]
+
+        df_segment_data.loc[i, "STROKES"] = 65535
+        df_segment_data.loc[i, "DISTANCE"] = 0
+        
+
+    i += 1
+
+df_segment_data["AVG_SWOLF"] = df_segment_data["STROKES"] + df_segment_data["TIME"]
+df_segment_data["PACE"] = 4*df_segment_data["TIME"]
+
+
+df_segment_data.iloc[4:]
+
 # TODO: figure out what the type = 1 data means
 # TODO: add pool length as data to session message
+
+
 
 df_heart_data = df_heart_data[["TIMESTAMP", "HEART_RATE"]]
 df_heart_data.loc[df_heart_data["HEART_RATE"] < 0, "HEART_RATE"] += 255
@@ -44,7 +89,7 @@ df_heart_data["CALORIES"] = (
     df_heart_data["TIMESTAMP"] - ds_summary["START_TIMESTAMP"]
 ) * calories_per_second
 
-
+print(ds_summary)
 
 
 # ---
@@ -86,41 +131,57 @@ builder.add(message)
 lap_time = 0
 lap_distance = 0
 
+laps = []
 
-# TODO: add first two ghost lengths
 start_time = int(ds_summary["START_TIMESTAMP"] * 1000)
 for index, row in df_segment_data.iterrows():
     message = LengthMessage()
     message.timestamp = int(ds_summary["START_TIMESTAMP"] * 1000)
-    message.start_time = start_time
+    message.start_time = start_time # TODO: fix for the skippy ones!!!
     message.total_elapsed_time = int(row["TIME"])
     message.total_timer_time = int(row["TIME"])
-    lap_time += int(row["TIME"])
-    lap_distance += 25
     message.message_index = int(index)
     message.total_strokes = int(row["STROKES"])
     message.avg_speed = row["DISTANCE"] / row["TIME"]                  
     message.event = 28
-    message.event_type = 1  # 0 for active length
-    message.swim_stroke = 0  # Freestyle
+    message.event_type = 1 if row["DISTANCE"] > 0 else 0  # 1 for active length
+    message.swim_stroke = 0 if row["DISTANCE"] > 0 else 255  # 1 for active length
     message.avg_swim_cadence = int(row["STROKES"] / (row["TIME"] * 60))
     message.event_group = 255
     message.length_type = 1
     builder.add(message)
     
-    if not index % 4:
+    if row["DISTANCE"] < 1:
+        message = LapMessage()
+        message.timestamp = int(ds_summary["START_TIMESTAMP"] * 1000)
+        message.start_time = start_time
+        message.total_elapsed_time = int(row["TIME"])
+        message.total_distance = 0
+        message.num_lengths = 0
+        message.total_timer_time = int(row["TIME"])
+        message.swim_stroke = 255
+
+
+        laps.append(message)
+    else:
+        lap_time += int(row["TIME"])
+        lap_distance += 25
+
+    if lap_distance >= TARGET_DISTANCE:
         message = LapMessage()
         message.timestamp = int(ds_summary["START_TIMESTAMP"] * 1000)
         message.start_time = start_time
         message.total_elapsed_time = lap_time
         message.total_distance = lap_distance
+        message.num_lengths = int(lap_distance // 25)
         message.total_timer_time = lap_time
+        message.swim_stroke = 0
         lap_time = 0
         lap_distance = 0
         # total cycles
         # total work
         # total_moving_time,4,bytes,time_standing,4,bytes,avg_left_power_phase,4,bytes,avg_left_power_phase_peak,4,bytes,avg_right_power_phase,4,bytes,avg_right_power_phase_peak,4,bytes,avg_power_position,4,bytes,max_power_position,4,bytes,enhanced_avg_speed,4,bytes,enhanced_max_speed,4,bytes,enhanced_avg_altitude,4,bytes,enhanced_min_altitude,4,bytes,enhanced_max_altitude,4,bytes,message_index,2,bytes,total_calories,2,bytes,total_fat_calories,2,bytes,avg_speed,2,bytes,max_speed,2,bytes,avg_power,2,bytes,max_power,2,bytes,total_ascent,2,bytes,total_descent,2,bytes,num_lengths,2,bytes,normalized_power,2,bytes,left_right_balance,2,bytes,first_length_index,2,bytes,avg_stroke_distance,2,bytes,num_active_lengths,2,bytes,wkt_step_index,2,bytes,avg_vertical_oscillation,2,bytes,avg_stance_time_percent,2,bytes,avg_stance_time,2,bytes,stand_count,2,bytes,avg_vertical_ratio,2,bytes,avg_stance_time_balance,2,bytes,avg_step_length,2,bytes,event,1,bytes,event_type,1,bytes,avg_heart_rate,1,bytes,max_heart_rate,1,bytes,avg_cadence,1,bytes,max_cadence,1,bytes,intensity,1,bytes,lap_trigger,1,bytes,sport,1,bytes,event_group,1,bytes,swim_stroke,1,bytes,sub_sport,1,bytes,avg_temperature,1,bytes,max_temperature,1,bytes,avg_fractional_cadence,1,bytes,max_fractional_cadence,1,bytes,total_fractional_cycles,1,bytes,avg_left_torque_effectiveness,1,bytes,avg_right_torque_effectiveness,1,bytes,avg_left_pedal_smoothness,1,bytes,avg_right_pedal_smoothness,1,bytes,avg_combined_pedal_smoothness,1,bytes,avg_left_pco,1,bytes,avg_right_pco,1,bytes,avg_cadence_position,2,bytes,max_cadence_position,2,bytes
-        builder.add(message)
+        laps.append(message)
 
     start_time += int(row["TIME"]) * 1000
 
@@ -128,7 +189,7 @@ for index, row in df_segment_data.iterrows():
 
 
 
-
+builder.add_all(laps)
 
 
 
