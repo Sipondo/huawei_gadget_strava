@@ -8,6 +8,7 @@ TARGET_DISTANCE = 100
 path = r"C:\Users\tt_ro\Nextcloud\Gadgetbridge\db"
 # path = r"C:\Users\Ties Robroek\Nextcloud\Gadgetbridge\db"
 db_path = f"{path}\Gadgetbridge.db"
+db_path = f"{path}\\"+r".Gadgetbridge.db.~138d"
 engine = create_engine(f"sqlite:///{db_path}")
 df_summary = pd.read_sql_table("HUAWEI_WORKOUT_SUMMARY_SAMPLE", engine)
 

@@ -219,8 +219,8 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description='Upload FIT files to Strava')
-    parser.add_argument('file', nargs='?', default='output/25_swimming.fit',
-                        help='FIT file to upload (default: output/25_swimming.fit)')
+    parser.add_argument('file', nargs='?', default='output/402_swimming.fit',
+                        help='FIT file to upload (default: output/402_swimming.fit)')
     parser.add_argument('--name', help='Activity name')
     parser.add_argument('--description', help='Activity description')
     parser.add_argument('--type', default='Swim', help='Activity type (default: Swim)')

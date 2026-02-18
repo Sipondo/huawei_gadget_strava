@@ -17,7 +17,7 @@ from fit_tool.profile.profile_type import Sport, SubSport, SwimStroke, Event, Ev
 # READ AND PREPARE DATA
 # ============================================================================
 
-workout_id = 10
+workout_id = 402
 pool_length = 25  # meters
 
 raw_heart_fname = f"raw/{workout_id}_heart_swimming.csv"
@@ -201,8 +201,9 @@ builder.add(activity)
 print(f"Writing FIT file to {output_fname}...")
 fit_file = builder.build()
 
-with open(output_fname, 'wb') as f:
-    fit_file.to_bytes(f)
+# with open(output_fname, 'wb') as f:
+#     fit_file.to_bytes(f)
+fit_file.to_file(output_fname)
 
 print(f"✓ Successfully created {output_fname}")
 print(f"  - Duration: {total_time/60:.1f} minutes")
