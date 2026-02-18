@@ -123,25 +123,59 @@ session.event = Event.SESSION
 session.event_type = EventType.STOP
 builder.add(session)
 
-# Lap Message (single lap for entire session)
-lap = LapMessage()
-lap.timestamp = int((start_timestamp + total_time) * 1000)
-lap.start_time = int(start_timestamp * 1000)
-lap.total_elapsed_time = total_time
-lap.total_timer_time = total_time
-lap.total_distance = total_distance
-lap.total_calories = calories
-lap.avg_heart_rate = avg_heart_rate
-lap.max_heart_rate = max_heart_rate
-lap.total_cycles = total_strokes
-lap.enhanced_avg_speed = avg_speed
-lap.enhanced_max_speed = max_speed
-lap.event = Event.LAP
-lap.event_type = EventType.STOP
-builder.add(lap)
+# Add Lap Messages (one per pool length) and Record Messages
+print(f"Adding {len(df_segment_data)} laps and {len(df_heart_data)} heart rate records...")
 
-# Add Length Messages (one per pool length)
-for idx, row in df_segment_data.iterrows():
+# Track heart rate stats per lap
+lap_hr_data = {}
+for segment_idx, (idx, row) in enumerate(df_segment_data.iterrows()):
+    segment_start = row['START_TIMESTAMP']
+    segment_end = row['END_TIMESTAMP']
+    
+    # Get heart rate data for this segment
+    segment_hr = df_heart_data[
+        (df_heart_data['TIMESTAMP'] >= segment_start) & 
+        (df_heart_data['TIMESTAMP'] <= segment_end)
+    ]
+    
+    if len(segment_hr) > 0:
+        lap_hr_data[segment_idx] = {
+            'avg': int(segment_hr['HEART_RATE'].mean()),
+            'max': int(segment_hr['HEART_RATE'].max()),
+            'min': int(segment_hr['HEART_RATE'].min())
+        }
+    else:
+        lap_hr_data[segment_idx] = {
+            'avg': avg_heart_rate,
+            'max': max_heart_rate,
+            'min': 0
+        }
+
+# Add a lap for each length
+for segment_idx, (idx, row) in enumerate(df_segment_data.iterrows()):
+    lap = LapMessage()
+    lap.timestamp = int(row['END_TIMESTAMP'] * 1000)
+    lap.start_time = int(row['START_TIMESTAMP'] * 1000)
+    lap.total_elapsed_time = row['TIME']
+    lap.total_timer_time = row['TIME']
+    lap.total_distance = row['DISTANCE']
+    
+    # Use segment-specific heart rate stats
+    hr_stats = lap_hr_data.get(segment_idx, {'avg': avg_heart_rate, 'max': max_heart_rate, 'min': 0})
+    lap.avg_heart_rate = hr_stats['avg']
+    lap.max_heart_rate = hr_stats['max']
+    
+    lap.total_cycles = int(row['STROKES'])
+    lap_speed = row['DISTANCE'] / row['TIME'] if row['TIME'] > 0 else 0
+    lap.enhanced_avg_speed = lap_speed
+    lap.enhanced_max_speed = lap_speed
+    lap.event = Event.LAP
+    lap.event_type = EventType.STOP
+    lap.message_index = segment_idx
+    
+    builder.add(lap)
+    
+    # Add Length Message for this segment
     length = LengthMessage()
     length.timestamp = int(row['END_TIMESTAMP'] * 1000)
     length.start_time = int(row['START_TIMESTAMP'] * 1000)
@@ -162,15 +196,14 @@ for idx, row in df_segment_data.iterrows():
     else:
         length.avg_swimming_cadence = 0
     
-    length.length_type = 1 #LengthLengthTypeField.ACTIVE
+    length.length_type = 1  # ACTIVE
     length.event = Event.LENGTH
     length.event_type = EventType.STOP
-    length.message_index = idx
+    length.message_index = segment_idx
     
     builder.add(length)
 
-# Add Record Messages (heart rate data points)
-print(f"Adding {len(df_heart_data)} heart rate records...")
+# Add Record Messages (heart rate data points) - these must be added after laps/lengths
 for idx, row in df_heart_data.iterrows():
     # Only add records within the workout timeframe
     if row['TIMESTAMP'] >= start_timestamp and row['TIMESTAMP'] <= (start_timestamp + total_time):
