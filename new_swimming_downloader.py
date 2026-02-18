@@ -20,13 +20,6 @@ df_workout_ids = pd.read_sql_query(
 
 for workout_id in df_workout_ids["WORKOUT_ID"]:
     print("WORKOUT_ID: ", workout_id)
-    filename = f"sessions/{workout_id}_swimming."
-    filename_fit = filename + "fit"
-    filename_csv = filename + "csv"
-
-    if Path(filename_fit).exists():
-        print(f"{filename_fit} exists")
-        continue
 
     ds_summary = df_summary.set_index("WORKOUT_ID").loc[workout_id]
 
