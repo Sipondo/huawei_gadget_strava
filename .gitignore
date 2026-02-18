@@ -173,4 +173,9 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-output
+# Project specific files
+output/
+strava_config.json
+raw/
+sessions/*.csv
+sessions/*.fit
