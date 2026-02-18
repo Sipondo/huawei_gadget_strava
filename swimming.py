@@ -41,6 +41,11 @@ for workout_id in [25]:
         engine,
     ).groupby("SEGMENT").first().reset_index(drop=True)
 
+    raw_heart_fname = f"raw/{workout_id}_heart_swimming.csv"
+    raw_segment_fname = f"raw/{workout_id}_segments_swimming.csv"
+    df_heart_data.to_csv(raw_heart_fname, index=False)
+    df_segment_data.to_csv(raw_segment_fname, index=False)
+
 
 
 
