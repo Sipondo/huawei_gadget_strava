@@ -176,6 +176,7 @@ cython_debug/
 # Project specific files
 output/
 strava_config.json
+file_config.json
 raw/
 sessions/*.csv
 sessions/*.fit
