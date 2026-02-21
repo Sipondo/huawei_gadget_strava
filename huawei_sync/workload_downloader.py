@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 from pathlib import Path
 
 import pandas as pd
@@ -79,6 +80,20 @@ def resolve_output_dir(cli_output_dir: str | None) -> Path:
 	return Path(__file__).resolve().parents[1] / "raw" / "workouts"
 
 
+def resolve_gpx_dir() -> Path | None:
+	config = load_config()
+	gpx_location = config.get("gpx_location", "")
+	if not gpx_location:
+		return None
+
+	gpx_dir = Path(gpx_location)
+	if gpx_dir.exists():
+		return gpx_dir
+
+	print(f"GPX directory does not exist: {gpx_dir}")
+	return None
+
+
 def get_workout_tables(engine) -> list[str]:
 	db_inspector = inspect(engine)
 	tables = []
@@ -123,6 +138,24 @@ def export_workout(engine, workout_id: int, workout_tables: list[str], output_di
 	return exported_files
 
 
+def copy_gpx_files(gpx_dir: Path | None, workout_id: int, workout_dir: Path) -> int:
+	if not gpx_dir:
+		return 0
+
+	pattern = f"workout_{workout_id}_*"
+	matching_files = [path for path in gpx_dir.glob(pattern) if path.is_file()]
+
+	if not matching_files:
+		return 0
+
+	workout_dir.mkdir(parents=True, exist_ok=True)
+	for source_path in matching_files:
+		destination = workout_dir / source_path.name
+		shutil.copy2(source_path, destination)
+
+	return len(matching_files)
+
+
 def main() -> None:
 	parser = argparse.ArgumentParser(
 		description=(
@@ -145,6 +178,7 @@ def main() -> None:
 	db_path = resolve_db_path(args.db_path)
 	output_dir = resolve_output_dir(args.output_dir)
 	output_dir.mkdir(parents=True, exist_ok=True)
+	gpx_dir = resolve_gpx_dir()
 
 	engine = create_engine(f"sqlite:///{db_path}")
 
@@ -167,12 +201,15 @@ def main() -> None:
 
 	for workout_id in workout_ids:
 		workout_dir = output_dir / str(workout_id)
-		if workout_already_exported(workout_dir):
+		if False: #workout_already_exported(workout_dir):
 			print(f"Skipping workout {workout_id}: files already exist in {workout_dir}")
 			skipped += 1
 			continue
 
 		print(f"Exporting workout {workout_id}...")
+		copied_gpx = copy_gpx_files(gpx_dir, workout_id, workout_dir)
+		if copied_gpx:
+			print(f"  Copied {copied_gpx} gpx file(s)")
 		exported_files = export_workout(engine, workout_id, workout_tables, output_dir)
 		print(f"  Saved {exported_files} file(s)")
 		exported += 1
