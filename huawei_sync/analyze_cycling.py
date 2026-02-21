@@ -20,6 +20,7 @@ def parse_iso_timestamp(value: str) -> float:
 
 
 def to_semicircles(value: float) -> int:
+    return value
     return int(value * (2**31) / 180)
 
 

@@ -42,7 +42,7 @@ def analyze_workout(workout_dir: Path, output_dir: Path, pool_length: int) -> Pa
         df_segment_data = df_segment_data[df_segment_data["WORKOUT_ID"] == int(workout_id)]
 
     print(f"Processing {len(df_segment_data)} segments...")
-
+    df_segment_data = df_segment_data.groupby("SEGMENT").first().reset_index(drop=True)
     df_segment_data = df_segment_data.sort_values("SEGMENT_INDEX").reset_index(drop=True)
     df_heart_data["HEART_RATE"] = df_heart_data["HEART_RATE"].abs()
     df_heart_data["SPEED_MS"] = df_heart_data["SPEED"] / 10.0
