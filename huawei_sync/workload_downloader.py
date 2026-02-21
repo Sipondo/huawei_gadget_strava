@@ -67,6 +67,18 @@ def resolve_db_path(cli_db_path: str | None) -> Path:
 	)
 
 
+def resolve_output_dir(cli_output_dir: str | None) -> Path:
+	if cli_output_dir:
+		return Path(cli_output_dir)
+
+	config = load_config()
+	workout_location = config.get("workout_location", "")
+	if workout_location:
+		return Path(workout_location)
+
+	return Path(__file__).resolve().parents[1] / "raw" / "workouts"
+
+
 def get_workout_tables(engine) -> list[str]:
 	db_inspector = inspect(engine)
 	tables = []
@@ -112,8 +124,6 @@ def export_workout(engine, workout_id: int, workout_tables: list[str], output_di
 
 
 def main() -> None:
-	default_output_dir = Path(__file__).resolve().parents[1] / "raw" / "workouts"
-
 	parser = argparse.ArgumentParser(
 		description=(
 			"Download all Huawei workout-related table data per workout_id "
@@ -127,13 +137,13 @@ def main() -> None:
 	)
 	parser.add_argument(
 		"--output-dir",
-		default=str(default_output_dir),
+		default=None,
 		help="Directory where workout folders and csv files will be written.",
 	)
 	args = parser.parse_args()
 
 	db_path = resolve_db_path(args.db_path)
-	output_dir = Path(args.output_dir)
+	output_dir = resolve_output_dir(args.output_dir)
 	output_dir.mkdir(parents=True, exist_ok=True)
 
 	engine = create_engine(f"sqlite:///{db_path}")
