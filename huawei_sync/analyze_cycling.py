@@ -93,7 +93,7 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
             "HUAWEI_WORKOUT_SUMMARY_SAMPLE.csv in the workout folder."
         )
 
-    gpx_matches = list(workout_dir.glob(f"workout_{workout_id}_*.gpx"))
+    gpx_matches = list(workout_dir.glob(f"workout_*.gpx"))
     if not gpx_matches:
         raise FileNotFoundError(f"No GPX file found in {workout_dir}")
 
