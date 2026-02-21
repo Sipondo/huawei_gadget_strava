@@ -104,13 +104,22 @@ def get_workout_tables(engine) -> list[str]:
 	return sorted(tables)
 
 
-def get_workout_ids(engine) -> list[int]:
+def get_workout_rows(engine) -> list[dict]:
 	query = text(
-		f"SELECT DISTINCT WORKOUT_ID FROM {SUMMARY_TABLE} "
+		f"SELECT DISTINCT WORKOUT_ID, WORKOUT_NUMBER FROM {SUMMARY_TABLE} "
 		"WHERE WORKOUT_ID IS NOT NULL ORDER BY WORKOUT_ID"
 	)
-	df_workout_ids = pd.read_sql_query(query, engine)
-	return [int(workout_id) for workout_id in df_workout_ids["WORKOUT_ID"].tolist()]
+	df_workouts = pd.read_sql_query(query, engine)
+
+	rows = []
+	for _, row in df_workouts.iterrows():
+		workout_id = int(row["WORKOUT_ID"])
+		workout_number = None
+		if "WORKOUT_NUMBER" in row and pd.notna(row["WORKOUT_NUMBER"]):
+			workout_number = int(row["WORKOUT_NUMBER"])
+		rows.append({"workout_id": workout_id, "workout_number": workout_number})
+
+	return rows
 
 
 def workout_already_exported(workout_dir: Path) -> bool:
@@ -138,12 +147,25 @@ def export_workout(engine, workout_id: int, workout_tables: list[str], output_di
 	return exported_files
 
 
-def copy_gpx_files(gpx_dir: Path | None, workout_id: int, workout_dir: Path) -> int:
+def copy_gpx_files(
+	gpx_dir: Path | None,
+	workout_id: int,
+	workout_number: int | None,
+	workout_dir: Path,
+) -> int:
 	if not gpx_dir:
 		return 0
 
-	pattern = f"workout_{workout_id}_*"
-	matching_files = [path for path in gpx_dir.glob(pattern) if path.is_file()]
+	patterns = []
+	if workout_number is not None:
+		patterns.append(f"workout_{workout_number}_*")
+	# patterns.append(f"workout_{workout_id}_*")
+
+	matching_files = []
+	for pattern in patterns:
+		matching_files.extend([path for path in gpx_dir.glob(pattern) if path.is_file()])
+
+	matching_files = sorted({path.resolve(): path for path in matching_files}.values())
 
 	if not matching_files:
 		return 0
@@ -182,8 +204,8 @@ def main() -> None:
 
 	engine = create_engine(f"sqlite:///{db_path}")
 
-	workout_ids = get_workout_ids(engine)
-	if not workout_ids:
+	workout_rows = get_workout_rows(engine)
+	if not workout_rows:
 		print("No workouts found in summary table.")
 		return
 
@@ -193,21 +215,23 @@ def main() -> None:
 		return
 
 	print(f"Database: {db_path}")
-	print(f"Workouts found: {len(workout_ids)}")
+	print(f"Workouts found: {len(workout_rows)}")
 	print(f"Workout-related tables: {len(workout_tables)}")
 
 	skipped = 0
 	exported = 0
 
-	for workout_id in workout_ids:
+	for workout in workout_rows:
+		workout_id = workout["workout_id"]
+		workout_number = workout["workout_number"]
 		workout_dir = output_dir / str(workout_id)
 		if False: #workout_already_exported(workout_dir):
 			print(f"Skipping workout {workout_id}: files already exist in {workout_dir}")
 			skipped += 1
 			continue
 
-		print(f"Exporting workout {workout_id}...")
-		copied_gpx = copy_gpx_files(gpx_dir, workout_id, workout_dir)
+		print(f"Exporting workout {workout_id} (number={workout_number})...")
+		copied_gpx = copy_gpx_files(gpx_dir, workout_id, workout_number, workout_dir)
 		if copied_gpx:
 			print(f"  Copied {copied_gpx} gpx file(s)")
 		exported_files = export_workout(engine, workout_id, workout_tables, output_dir)
@@ -216,7 +240,7 @@ def main() -> None:
 
 	print(
 		"Done. "
-		f"Exported workouts: {exported}, Skipped workouts: {skipped}, Total workouts: {len(workout_ids)}"
+		f"Exported workouts: {exported}, Skipped workouts: {skipped}, Total workouts: {len(workout_rows)}"
 	)
 
 
