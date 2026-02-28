@@ -150,7 +150,7 @@ def build_activity_description(workout_row):
         details.append(f"Workout ID: {int(workout_id)}")
 
     details.append("Synced with my custom syncing solution :)")
-    return " | ".join(details)
+    return "\n".join(details)
 
 
 def should_upload_private(workout_row):
@@ -186,7 +186,7 @@ def fetch_unsynced_workouts(connection):
         fit_file = row.get("fit_file_path")
         if fit_file and Path(fit_file).exists():
             rows.append(row)
-    return rows
+    return reversed(rows)
 
 
 def update_sync_status(file_path, upload_result):
@@ -471,6 +471,7 @@ def upload_pending_from_db(activity_type_override=None):
 
         if result:
             time.sleep(2)
+        break
 
     print("\n" + "="*60)
     print("DB UPLOAD SUMMARY")
