@@ -2,6 +2,7 @@ import requests
 import time
 import os
 import json
+import sqlite3
 from pathlib import Path
 
 # ============================================================================
@@ -32,6 +33,88 @@ if config_file.exists():
         STRAVA_CLIENT_ID = config.get('client_id', STRAVA_CLIENT_ID)
         STRAVA_CLIENT_SECRET = config.get('client_secret', STRAVA_CLIENT_SECRET)
         STRAVA_ACCESS_TOKEN = config.get('access_token', STRAVA_ACCESS_TOKEN)
+
+SYNC_DB_LOCATION = ""
+sync_config_file = Path('file_config.json')
+if not sync_config_file.exists():
+    sync_config_file = Path(r'huawei_sync\file_config.json')
+
+if sync_config_file.exists():
+    with open(sync_config_file, 'r') as f:
+        sync_config = json.load(f)
+        SYNC_DB_LOCATION = sync_config.get('sync_db_location', '')
+
+
+def resolve_sync_db_path(sync_db_location):
+    if not sync_db_location:
+        return None
+
+    path = Path(sync_db_location)
+    if path.suffix.lower() == '.db':
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    path.mkdir(parents=True, exist_ok=True)
+    return path / 'workout_sync.db'
+
+
+def parse_workout_id_from_path(file_path):
+    stem = Path(file_path).stem
+    workout_prefix = stem.split('_')[0]
+    return int(workout_prefix) if workout_prefix.isdigit() else None
+
+
+def update_sync_status(file_path, upload_result):
+    sync_db_path = resolve_sync_db_path(SYNC_DB_LOCATION)
+    if sync_db_path is None:
+        return
+
+    workout_id = parse_workout_id_from_path(file_path)
+    if workout_id is None:
+        return
+
+    connection = sqlite3.connect(sync_db_path)
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workouts (
+            workout_id INTEGER PRIMARY KEY,
+            workout_number INTEGER,
+            workout_type TEXT NOT NULL,
+            workout_date TEXT,
+            duration_seconds REAL,
+            total_distance_m REAL,
+            total_calories INTEGER,
+            has_gps INTEGER NOT NULL DEFAULT 0,
+            source_workout_dir TEXT NOT NULL,
+            fit_file_path TEXT,
+            fit_generated_at TEXT,
+            last_analyzed_at TEXT NOT NULL,
+            strava_synced INTEGER NOT NULL DEFAULT 0,
+            strava_activity_id INTEGER,
+            strava_activity_url TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        UPDATE workouts
+        SET strava_synced = 1,
+            strava_activity_id = ?,
+            strava_activity_url = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE workout_id = ?
+        """,
+        (
+            upload_result.get('activity_id'),
+            upload_result.get('url'),
+            workout_id,
+        ),
+    )
+    connection.commit()
+    connection.close()
 
 # ============================================================================
 # UPLOAD FUNCTIONS
@@ -88,6 +171,8 @@ def upload_to_strava(file_path, activity_name=None, activity_type="Swim", descri
     }
     
     # Read the file
+    response = None
+
     with open(file_path, 'rb') as f:
         files = {
             'file': (os.path.basename(file_path), f, 'application/octet-stream')
@@ -109,7 +194,8 @@ def upload_to_strava(file_path, activity_name=None, activity_type="Swim", descri
             response.raise_for_status()
         except requests.exceptions.HTTPError as e:
             print(f"Upload failed: {e}")
-            print(f"Response: {response.text}")
+            if response is not None:
+                print(f"Response: {response.text}")
             return None
         except requests.exceptions.RequestException as e:
             print(f"Network error: {e}")
@@ -151,11 +237,13 @@ def upload_to_strava(file_path, activity_name=None, activity_type="Swim", descri
                 print(f"\nUpload successful!")
                 print(f"Activity ID: {activity_id}")
                 print(f"View at: https://www.strava.com/activities/{activity_id}")
-                return {
+                result = {
                     'upload_id': upload_id,
                     'activity_id': activity_id,
                     'url': f'https://www.strava.com/activities/{activity_id}'
                 }
+                update_sync_status(file_path, result)
+                return result
             
             print(f"   Status: {status} (attempt {attempt}/{max_attempts})")
             
