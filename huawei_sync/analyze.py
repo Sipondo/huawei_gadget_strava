@@ -11,6 +11,7 @@ import pandas as pd
 sys.path.append(str(Path(__file__).resolve().parent))
 
 from analyze_cycling import analyze_workout as analyze_cycling
+from analyze_indoor_cycling import analyze_workout as analyze_indoor_cycling
 from analyze_indoor_running import analyze_workout as analyze_indoor_running
 from analyze_strength import analyze_workout as analyze_strength
 from analyze_swimming import analyze_workout as analyze_swimming
@@ -18,6 +19,14 @@ from analyze_swimming import analyze_workout as analyze_swimming
 
 CONFIG_FILE_NAME = "file_config.json"
 SYNC_DB_FILE_NAME = "workout_sync.db"
+
+TYPE_TO_WORKOUT_TYPE = {
+	"3": "cycling",
+	"-116": "strength",
+	"5": "indoor_running",
+	"7": "indoor_cycling",
+	"6": "swimming",
+}
 
 
 def load_config() -> dict:
@@ -48,31 +57,21 @@ def detect_workout_type(workout_dir: Path) -> Optional[str]:
 				df_summary = df_summary[df_summary["WORKOUT_ID"] == workout_id]
 
 			if not df_summary.empty and "TYPE" in df_summary.columns:
-				type_value = df_summary.iloc[0]["TYPE"]
-				type_text = str(type_value).strip().lower()
+				type_key = str(df_summary.iloc[0]["TYPE"]).strip()
+				if type_key in TYPE_TO_WORKOUT_TYPE:
+					return TYPE_TO_WORKOUT_TYPE[type_key]
 
-				text_map = {
-					"swim": "swimming",
-					"swimming": "swimming",
-					"cycle": "cycling",
-					"cycling": "cycling",
-					"bike": "cycling",
-					"run": "indoor_running",
-					"indoor_run": "indoor_running",
-					"indoor running": "indoor_running",
-					"treadmill": "indoor_running",
-					"strength": "strength",
-					"workout": "strength",
-					"training": "strength",
-				}
-
-				for key, mapped_type in text_map.items():
-					if key in type_text:
-						return mapped_type
-
-				# Known numeric mapping observed from Huawei summary exports
-				if type_text in {"-116", "116"}:
+				type_text = type_key.lower()
+				if "swim" in type_text:
+					return "swimming"
+				if "indoor" in type_text and "run" in type_text:
+					return "indoor_running"
+				if "indoor" in type_text and ("cycle" in type_text or "bike" in type_text):
+					return "indoor_cycling"
+				if "cycle" in type_text or "bike" in type_text:
 					return "cycling"
+				if "strength" in type_text or "training" in type_text:
+					return "strength"
 		except Exception:
 			pass
 
@@ -378,6 +377,16 @@ def main() -> None:
 		if workout_type == "cycling":
 			print(f"Analyzing cycling workout in {workout_dir}...")
 			fit_path = analyze_cycling(workout_dir, fit_root)
+			upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
+			synced, url = get_sync_status(connection, workout_id)
+			print(f"  Sync status: {'synced' if synced else 'not synced'}")
+			if url:
+				print(f"  Strava URL: {url}")
+			continue
+
+		if workout_type == "indoor_cycling":
+			print(f"Analyzing indoor cycling workout in {workout_dir}...")
+			fit_path = analyze_indoor_cycling(workout_dir, fit_root)
 			upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
 			synced, url = get_sync_status(connection, workout_id)
 			print(f"  Sync status: {'synced' if synced else 'not synced'}")

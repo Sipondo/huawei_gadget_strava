@@ -72,6 +72,8 @@ def infer_activity_type(file_path):
         return "Swim"
     if stem.endswith("_cycling"):
         return "Ride"
+    if stem.endswith("_indoor_cycling"):
+        return "Ride"
     if stem.endswith("_indoor_running"):
         return "Run"
     if stem.endswith("_strength"):
@@ -84,6 +86,8 @@ def infer_activity_type_from_workout_type(workout_type):
     if workout_type == "swimming":
         return "Swim"
     if workout_type == "cycling":
+        return "Ride"
+    if workout_type == "indoor_cycling":
         return "Ride"
     if workout_type == "indoor_running":
         return "Run"
@@ -152,6 +156,8 @@ def build_activity_description(workout_row):
 def should_upload_private(workout_row):
     workout_type = workout_row.get("workout_type")
     has_gps = int(workout_row.get("has_gps") or 0)
+    if workout_type == "indoor_cycling":
+        return True
     return workout_type == "cycling" and has_gps == 0
 
 
