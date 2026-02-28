@@ -66,6 +66,52 @@ def parse_workout_id_from_path(file_path):
     return int(workout_prefix) if workout_prefix.isdigit() else None
 
 
+def resolve_workout_id_for_file(connection, file_path):
+    file_path_str = str(file_path)
+    file_name = Path(file_path_str).name
+    parsed_id = parse_workout_id_from_path(file_path_str)
+
+    if parsed_id is not None:
+        row = connection.execute(
+            "SELECT workout_id FROM workouts WHERE workout_id = ?",
+            (parsed_id,),
+        ).fetchone()
+        if row:
+            return int(row[0])
+
+    row = connection.execute(
+        """
+        SELECT workout_id FROM workouts
+        WHERE lower(fit_file_path) = lower(?)
+        """,
+        (file_path_str,),
+    ).fetchone()
+    if row:
+        return int(row[0])
+
+    row = connection.execute(
+        """
+        SELECT workout_id FROM workouts
+        WHERE lower(fit_file_path) LIKE '%' || lower(?)
+        ORDER BY workout_id DESC
+        LIMIT 1
+        """,
+        (file_name,),
+    ).fetchone()
+    if row:
+        return int(row[0])
+
+    if parsed_id is not None:
+        row = connection.execute(
+            "SELECT workout_id FROM workouts WHERE workout_number = ? ORDER BY workout_id DESC LIMIT 1",
+            (parsed_id,),
+        ).fetchone()
+        if row:
+            return int(row[0])
+
+    return None
+
+
 def extract_duplicate_activity(error_text):
     if not error_text:
         return None
@@ -215,10 +261,6 @@ def update_sync_status(file_path, upload_result):
     if sync_db_path is None:
         return
 
-    workout_id = parse_workout_id_from_path(file_path)
-    if workout_id is None:
-        return
-
     connection = sqlite3.connect(sync_db_path)
     connection.execute(
         """
@@ -244,7 +286,13 @@ def update_sync_status(file_path, upload_result):
         """
     )
 
-    connection.execute(
+    workout_id = resolve_workout_id_for_file(connection, file_path)
+    if workout_id is None:
+        print(f"Warning: Could not find DB workout row for uploaded file: {file_path}")
+        connection.close()
+        return
+
+    cursor = connection.execute(
         """
         UPDATE workouts
         SET strava_synced = 1,
@@ -259,6 +307,8 @@ def update_sync_status(file_path, upload_result):
             workout_id,
         ),
     )
+    if cursor.rowcount == 0:
+        print(f"Warning: Sync status update touched 0 rows for workout_id={workout_id}")
     connection.commit()
     connection.close()
 
