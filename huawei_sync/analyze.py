@@ -4,13 +4,14 @@ import sys
 import argparse
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, cast
 
 import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parent))
 
 from analyze_cycling import analyze_workout as analyze_cycling
+from analyze_indoor_running import analyze_workout as analyze_indoor_running
 from analyze_strength import analyze_workout as analyze_strength
 from analyze_swimming import analyze_workout as analyze_swimming
 
@@ -45,6 +46,34 @@ def detect_workout_type(workout_dir: Path) -> Optional[str]:
 
 	has_summary = (workout_dir / "HUAWEI_WORKOUT_SUMMARY_SAMPLE.csv").exists()
 	has_data = (workout_dir / "HUAWEI_WORKOUT_DATA_SAMPLE.csv").exists()
+	if has_summary and has_data:
+		try:
+			df_summary = pd.read_csv(workout_dir / "HUAWEI_WORKOUT_SUMMARY_SAMPLE.csv")
+			df_data = pd.read_csv(workout_dir / "HUAWEI_WORKOUT_DATA_SAMPLE.csv")
+			workout_id = int(workout_dir.name) if workout_dir.name.isdigit() else None
+
+			if workout_id is not None and "WORKOUT_ID" in df_summary.columns:
+				df_summary = df_summary[df_summary["WORKOUT_ID"] == workout_id]
+			if workout_id is not None and "WORKOUT_ID" in df_data.columns:
+				df_data = df_data[df_data["WORKOUT_ID"] == workout_id]
+
+			summary_distance = 0.0
+			if not df_summary.empty and "DISTANCE" in df_summary.columns:
+				summary_distance = float(df_summary.iloc[0]["DISTANCE"] or 0.0)
+
+			has_speed_column = "SPEED" in df_data.columns
+			has_running_speed = False
+			if has_speed_column and not df_data.empty:
+				running_speed_samples = cast(
+					pd.Series, pd.to_numeric(df_data["SPEED"], errors="coerce")
+				)
+				has_running_speed = float(running_speed_samples.max(skipna=True) or 0.0) > 0
+
+			if summary_distance > 0 and has_running_speed:
+				return "indoor_running"
+		except Exception:
+			pass
+
 	if has_summary and has_data:
 		return "strength"
 
@@ -320,6 +349,16 @@ def main() -> None:
 		if workout_type == "strength":
 			print(f"Analyzing strength workout in {workout_dir}...")
 			fit_path = analyze_strength(workout_dir, fit_root)
+			upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
+			synced, url = get_sync_status(connection, workout_id)
+			print(f"  Sync status: {'synced' if synced else 'not synced'}")
+			if url:
+				print(f"  Strava URL: {url}")
+			continue
+
+		if workout_type == "indoor_running":
+			print(f"Analyzing indoor running workout in {workout_dir}...")
+			fit_path = analyze_indoor_running(workout_dir, fit_root)
 			upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
 			synced, url = get_sync_status(connection, workout_id)
 			print(f"  Sync status: {'synced' if synced else 'not synced'}")
