@@ -64,6 +64,21 @@ def parse_workout_id_from_path(file_path):
     return int(workout_prefix) if workout_prefix.isdigit() else None
 
 
+def infer_activity_type(file_path):
+    stem = Path(file_path).stem.lower()
+
+    if stem.endswith("_swimming"):
+        return "Swim"
+    if stem.endswith("_cycling"):
+        return "Ride"
+    if stem.endswith("_indoor_running"):
+        return "Run"
+    if stem.endswith("_strength"):
+        return "WeightTraining"
+
+    return "Workout"
+
+
 def update_sync_status(file_path, upload_result):
     sync_db_path = resolve_sync_db_path(SYNC_DB_LOCATION)
     if sync_db_path is None:
@@ -138,14 +153,14 @@ def check_access_token():
         return False
     return True
 
-def upload_to_strava(file_path, activity_name=None, activity_type="Swim", description=None):
+def upload_to_strava(file_path, activity_name=None, activity_type=None, description=None):
     """
     Upload a FIT file to Strava
     
     Args:
         file_path: Path to the .fit file
         activity_name: Optional name for the activity
-        activity_type: Type of activity (default: "Swim")
+        activity_type: Type of activity (if None, inferred from file name)
         description: Optional description
     
     Returns:
@@ -154,6 +169,8 @@ def upload_to_strava(file_path, activity_name=None, activity_type="Swim", descri
     
     if not check_access_token():
         return None
+
+    resolved_activity_type = activity_type or infer_activity_type(file_path)
     
     # Check if file exists
     if not os.path.exists(file_path):
@@ -161,6 +178,7 @@ def upload_to_strava(file_path, activity_name=None, activity_type="Swim", descri
         return None
     
     print(f"\nUploading {file_path} to Strava...")
+    print(f"Activity type: {resolved_activity_type}")
     
     # Strava upload endpoint
     upload_url = 'https://www.strava.com/api/v3/uploads'
@@ -180,7 +198,7 @@ def upload_to_strava(file_path, activity_name=None, activity_type="Swim", descri
         
         data = {
             'data_type': 'fit',
-            'activity_type': activity_type
+            'activity_type': resolved_activity_type
         }
         
         if activity_name:
@@ -254,13 +272,13 @@ def upload_to_strava(file_path, activity_name=None, activity_type="Swim", descri
     print(f"Upload timed out. Check Strava manually: https://www.strava.com/")
     return None
 
-def upload_multiple_files(file_pattern, activity_type="Swim"):
+def upload_multiple_files(file_pattern, activity_type=None):
     """
     Upload multiple FIT files matching a pattern
     
     Args:
         file_pattern: Glob pattern for files (e.g., "output/*.fit")
-        activity_type: Type of activity
+        activity_type: Type of activity override for all files (None = infer per file)
     """
     from glob import glob
     
@@ -311,7 +329,7 @@ if __name__ == "__main__":
                         help='FIT file to upload (default: output/402_swimming.fit)')
     parser.add_argument('--name', help='Activity name')
     parser.add_argument('--description', help='Activity description')
-    parser.add_argument('--type', default='Swim', help='Activity type (default: Swim)')
+    parser.add_argument('--type', default=None, help='Activity type override (default: infer from file name)')
     parser.add_argument('--multiple', help='Upload multiple files matching pattern (e.g., "output/*.fit")')
     
     args = parser.parse_args()
