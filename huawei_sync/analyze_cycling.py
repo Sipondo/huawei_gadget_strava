@@ -24,8 +24,7 @@ def parse_iso_timestamp(value: str) -> float:
 
 
 def to_semicircles(value: float) -> int:
-    return value
-    return int(value * (2**31) / 180)
+    return int(value)
 
 
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -99,10 +98,8 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
         )
 
     gpx_matches = list(workout_dir.glob(f"workout_*.gpx"))
-    if not gpx_matches:
-        raise FileNotFoundError(f"No GPX file found in {workout_dir}")
-
-    gpx_fname = gpx_matches[0]
+    has_gpx = len(gpx_matches) > 0
+    gpx_fname = gpx_matches[0] if has_gpx else None
 
     print("Reading data files...")
     df_data = pd.read_csv(data_fname)
@@ -122,54 +119,100 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
 
     print("Processing cycling data...")
 
-    df_data = df_data[["TIMESTAMP", "HEART_RATE"]].copy()
+    selected_columns = ["TIMESTAMP", "HEART_RATE"]
+    if "SPEED" in df_data.columns:
+        selected_columns.append("SPEED")
+
+    df_data = df_data[selected_columns].copy()
     df_data.loc[df_data["HEART_RATE"] < 0, "HEART_RATE"] += 255
     df_data = df_data[df_data["HEART_RATE"] > 0]
     df_data["TIMESTAMP"] = df_data["TIMESTAMP"].astype(float)
     df_data = df_data.sort_values("TIMESTAMP").reset_index(drop=True)
 
-    df_gpx = parse_gpx_points(gpx_fname)
+    if "SPEED" in df_data.columns:
+        df_data["SPEED_MS"] = df_data["SPEED"].astype(float) / 10.0
+    else:
+        df_data["SPEED_MS"] = 0.0
+    df_data.loc[df_data["SPEED_MS"] < 0, "SPEED_MS"] = 0.0
 
-    distances = [0.0]
-    speeds = [0.0]
+    summary_distance = float(df_summary.get("DISTANCE", 0.0) or 0.0)
 
-    for idx in range(1, len(df_gpx)):
-        prev = df_gpx.iloc[idx - 1]
-        cur = df_gpx.iloc[idx]
-        delta = haversine_m(prev["lat"], prev["lon"], cur["lat"], cur["lon"])
-        dt = cur["timestamp"] - prev["timestamp"]
+    df_track = pd.DataFrame()
 
-        if dt <= 0:
-            speeds.append(0.0)
-            distances.append(distances[-1])
-            continue
+    if has_gpx:
+        df_gpx = parse_gpx_points(cast(Path, gpx_fname))
 
-        raw_speed = delta / dt
-        if raw_speed > MAX_REASONABLE_SPEED_MS:
-            speeds.append(0.0)
-            distances.append(distances[-1])
-            continue
+        distances = [0.0]
+        speeds = [0.0]
 
-        speeds.append(raw_speed)
-        distances.append(distances[-1] + delta)
+        for idx in range(1, len(df_gpx)):
+            prev = df_gpx.iloc[idx - 1]
+            cur = df_gpx.iloc[idx]
+            delta = haversine_m(prev["lat"], prev["lon"], cur["lat"], cur["lon"])
+            dt = cur["timestamp"] - prev["timestamp"]
 
-    df_gpx["distance"] = distances
-    df_gpx["speed"] = speeds
+            if dt <= 0:
+                speeds.append(0.0)
+                distances.append(distances[-1])
+                continue
 
-    if not df_data.empty:
-        df_gpx = pd.merge_asof(
-            df_gpx,
-            df_data,
-            left_on="timestamp",
-            right_on="TIMESTAMP",
-            direction="nearest",
-            tolerance=5,
+            raw_speed = delta / dt
+            if raw_speed > MAX_REASONABLE_SPEED_MS:
+                speeds.append(0.0)
+                distances.append(distances[-1])
+                continue
+
+            speeds.append(raw_speed)
+            distances.append(distances[-1] + delta)
+
+        df_gpx["distance"] = distances
+        df_gpx["speed"] = speeds
+
+        if not df_data.empty:
+            df_gpx = pd.merge_asof(
+                df_gpx,
+                df_data,
+                left_on="timestamp",
+                right_on="TIMESTAMP",
+                direction="nearest",
+                tolerance=5,
+            )
+
+        df_track = df_gpx
+    else:
+        print("No GPX found; using sensor-only cycling reconstruction.")
+
+        if df_data.empty:
+            raise ValueError("No sensor records found for cycling workout without GPX.")
+
+        reconstructed_distance = [0.0]
+        for idx in range(1, len(df_data)):
+            prev_ts = float(df_data.iloc[idx - 1]["TIMESTAMP"])
+            cur_ts = float(df_data.iloc[idx]["TIMESTAMP"])
+            dt = max(0.0, cur_ts - prev_ts)
+            speed_ms = float(df_data.iloc[idx - 1]["SPEED_MS"])
+            reconstructed_distance.append(reconstructed_distance[-1] + speed_ms * dt)
+
+        df_track = pd.DataFrame(
+            {
+                "timestamp": df_data["TIMESTAMP"],
+                "speed": df_data["SPEED_MS"],
+                "distance": reconstructed_distance,
+                "HEART_RATE": df_data["HEART_RATE"],
+            }
         )
 
-    start_timestamp = int(df_gpx["timestamp"].iloc[0])
-    end_timestamp = int(df_gpx["timestamp"].iloc[-1])
+        derived_distance = float(df_track["distance"].iloc[-1]) if not df_track.empty else 0.0
+        if summary_distance > 0 and derived_distance > 0:
+            scale = summary_distance / derived_distance
+            df_track["distance"] = df_track["distance"] * scale
+
+    start_timestamp = int(df_summary.get("START_TIMESTAMP", df_track["timestamp"].iloc[0]))
+    end_timestamp = int(df_summary.get("END_TIMESTAMP", df_track["timestamp"].iloc[-1]))
     total_time = max(end_timestamp - start_timestamp, 1)
-    total_distance = float(df_gpx["distance"].iloc[-1])
+    total_distance = float(df_track["distance"].iloc[-1]) if not df_track.empty else 0.0
+    if summary_distance > 0:
+        total_distance = summary_distance
 
     avg_speed = total_distance / total_time if total_time > 0 else 0
 
@@ -214,7 +257,7 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
     session.avg_heart_rate = avg_heart_rate
     session.max_heart_rate = max_heart_rate
     session.enhanced_avg_speed = avg_speed
-    session.enhanced_max_speed = df_gpx["speed"].max() if not df_gpx.empty else 0
+    session.enhanced_max_speed = df_track["speed"].max() if not df_track.empty else 0
     session.sport = Sport.CYCLING
     if hasattr(SubSport, "ROAD"):
         session.sub_sport = SubSport.ROAD
@@ -226,12 +269,13 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
     session.event_type = EventType.STOP
     builder.add(session)
 
-    print(f"Adding {len(df_gpx)} track points...")
-    for _, row in df_gpx.iterrows():
+    print(f"Adding {len(df_track)} track points...")
+    for _, row in df_track.iterrows():
         record = RecordMessage()
         record.timestamp = int(row["timestamp"] * 1000)
-        record.position_lat = to_semicircles(float(row["lat"]))
-        record.position_long = to_semicircles(float(row["lon"]))
+        if has_gpx and "lat" in row and "lon" in row:
+            record.position_lat = to_semicircles(float(row["lat"]))
+            record.position_long = to_semicircles(float(row["lon"]))
         record.distance = float(row["distance"])
         safe_speed = max(0.0, min(float(row["speed"]), MAX_FIT_SPEED_MS))
         record.speed = safe_speed
