@@ -149,16 +149,15 @@ def build_activity_description(workout_row):
     if workout_id is not None:
         details.append(f"Workout ID: {int(workout_id)}")
 
+    details.append(f"Synced at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
     details.append("Synced with my custom syncing solution :)")
     return "\n".join(details)
 
 
 def should_upload_private(workout_row):
     workout_type = workout_row.get("workout_type")
-    has_gps = int(workout_row.get("has_gps") or 0)
-    if workout_type == "indoor_cycling":
-        return True
-    return workout_type == "cycling" and has_gps == 0
+    return workout_type == "cycling"
 
 
 def fetch_unsynced_workouts(connection):
@@ -241,6 +240,30 @@ def update_sync_status(file_path, upload_result):
     connection.commit()
     connection.close()
 
+
+def mark_workout_handled(workout_id, synced_value, url_value=None):
+    sync_db_path = resolve_sync_db_path(SYNC_DB_LOCATION)
+    if sync_db_path is None:
+        return
+
+    connection = sqlite3.connect(sync_db_path)
+    connection.execute(
+        """
+        UPDATE workouts
+        SET strava_synced = ?,
+            strava_activity_url = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE workout_id = ?
+        """,
+        (
+            synced_value,
+            url_value,
+            workout_id,
+        ),
+    )
+    connection.commit()
+    connection.close()
+
 # ============================================================================
 # UPLOAD FUNCTIONS
 # ============================================================================
@@ -309,7 +332,9 @@ def upload_to_strava(file_path, activity_name=None, activity_type=None, descript
         data = {
             'data_type': 'fit',
             'activity_type': resolved_activity_type,
-            'private': 1 if is_private else 0
+            'private': 1 if is_private else 0,
+            'commute': 1 if is_private else 0
+
         }
         
         if activity_name:
@@ -445,9 +470,23 @@ def upload_pending_from_db(activity_type_override=None):
 
     print(f"Found {len(pending)} unsynced workout(s) in DB")
     results = []
+    skipped = 0
 
     for workout_row in pending:
         file_path = workout_row["fit_file_path"]
+        workout_id = workout_row.get("workout_id")
+
+        if workout_row.get("workout_type") == "indoor_cycling":
+            print(f"\nSkipping indoor cycling workout_id={workout_id}: not uploaded to Strava.")
+            mark_workout_handled(
+                workout_id,
+                -1,
+                "Skipped by sync policy (indoor_cycling)",
+            )
+            results.append({"file": file_path, "result": None, "skipped": True})
+            skipped += 1
+            continue
+
         resolved_type = (
             activity_type_override
             or infer_activity_type_from_workout_type(workout_row.get("workout_type"))
@@ -471,16 +510,20 @@ def upload_pending_from_db(activity_type_override=None):
 
         if result:
             time.sleep(2)
-        break
 
     print("\n" + "="*60)
     print("DB UPLOAD SUMMARY")
     print("="*60)
     successful = sum(1 for item in results if item["result"])
+    failed = sum(1 for item in results if not item.get("result") and not item.get("skipped"))
     print(f"Successful: {successful}/{len(results)}")
+    if skipped:
+        print(f"Skipped by policy: {skipped}")
+    if failed:
+        print(f"Failed: {failed}")
 
     for item in results:
-        status = "[OK]" if item["result"] else "[FAIL]"
+        status = "[SKIP]" if item.get("skipped") else ("[OK]" if item["result"] else "[FAIL]")
         print(f"{status} {item['file']}")
         if item["result"]:
             print(f"   -> {item['result']['url']}")
