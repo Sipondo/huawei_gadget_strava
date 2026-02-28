@@ -70,6 +70,7 @@ def main() -> None:
 		return
 
 	for workout_dir in workout_dirs:
+		print("\n")
 		workout_type = detect_workout_type(workout_dir)
 		if workout_type == "swimming":
 			print(f"Analyzing swimming workout in {workout_dir}...")
