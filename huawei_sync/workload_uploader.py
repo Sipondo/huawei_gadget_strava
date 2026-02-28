@@ -186,7 +186,7 @@ def fetch_unsynced_workouts(connection):
         fit_file = row.get("fit_file_path")
         if fit_file and Path(fit_file).exists():
             rows.append(row)
-    return reversed(rows)
+    return list(reversed(rows))
 
 
 def update_sync_status(file_path, upload_result):

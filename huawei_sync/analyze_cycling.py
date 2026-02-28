@@ -22,11 +22,6 @@ MAX_FIT_SPEED_MS = 65.535
 def parse_iso_timestamp(value: str) -> float:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
 
-
-def to_semicircles(value: float) -> int:
-    return int(value)
-
-
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     radius = 6371000
     phi1 = math.radians(lat1)
@@ -274,8 +269,8 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
         record = RecordMessage()
         record.timestamp = int(row["timestamp"] * 1000)
         if has_gpx and "lat" in row and "lon" in row:
-            record.position_lat = to_semicircles(float(row["lat"]))
-            record.position_long = to_semicircles(float(row["lon"]))
+            record.position_lat = float(row["lat"])
+            record.position_long = float(row["lon"])
         record.distance = float(row["distance"])
         safe_speed = max(0.0, min(float(row["speed"]), MAX_FIT_SPEED_MS))
         record.speed = safe_speed
