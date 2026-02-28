@@ -11,6 +11,7 @@ import pandas as pd
 sys.path.append(str(Path(__file__).resolve().parent))
 
 from analyze_cycling import analyze_workout as analyze_cycling
+from analyze_strength import analyze_workout as analyze_strength
 from analyze_swimming import analyze_workout as analyze_swimming
 
 
@@ -41,6 +42,11 @@ def detect_workout_type(workout_dir: Path) -> Optional[str]:
 	gpx_matches = list(workout_dir.glob("workout_*.gpx"))
 	if gpx_matches:
 		return "cycling"
+
+	has_summary = (workout_dir / "HUAWEI_WORKOUT_SUMMARY_SAMPLE.csv").exists()
+	has_data = (workout_dir / "HUAWEI_WORKOUT_DATA_SAMPLE.csv").exists()
+	if has_summary and has_data:
+		return "strength"
 
 	return None
 
@@ -304,6 +310,16 @@ def main() -> None:
 		if workout_type == "cycling":
 			print(f"Analyzing cycling workout in {workout_dir}...")
 			fit_path = analyze_cycling(workout_dir, fit_root)
+			upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
+			synced, url = get_sync_status(connection, workout_id)
+			print(f"  Sync status: {'synced' if synced else 'not synced'}")
+			if url:
+				print(f"  Strava URL: {url}")
+			continue
+
+		if workout_type == "strength":
+			print(f"Analyzing strength workout in {workout_dir}...")
+			fit_path = analyze_strength(workout_dir, fit_root)
 			upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
 			synced, url = get_sync_status(connection, workout_id)
 			print(f"  Sync status: {'synced' if synced else 'not synced'}")
