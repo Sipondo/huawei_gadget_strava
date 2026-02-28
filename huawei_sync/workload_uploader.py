@@ -3,6 +3,7 @@ import time
 import os
 import json
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 # ============================================================================
@@ -79,6 +80,109 @@ def infer_activity_type(file_path):
     return "Workout"
 
 
+def infer_activity_type_from_workout_type(workout_type):
+    if workout_type == "swimming":
+        return "Swim"
+    if workout_type == "cycling":
+        return "Ride"
+    if workout_type == "indoor_running":
+        return "Run"
+    if workout_type == "strength":
+        return "WeightTraining"
+    return "Workout"
+
+
+def day_period_from_iso(iso_value):
+    if not iso_value:
+        return "workout"
+
+    try:
+        parsed = datetime.fromisoformat(str(iso_value).replace("Z", "+00:00"))
+        hour = parsed.hour
+        if 5 <= hour < 12:
+            return "morning"
+        if 12 <= hour < 17:
+            return "afternoon"
+        if 17 <= hour < 22:
+            return "evening"
+        return "night"
+    except Exception:
+        return "workout"
+
+
+def workout_label(workout_type):
+    mapping = {
+        "swimming": "swim",
+        "cycling": "ride",
+        "indoor_running": "run",
+        "strength": "strength session",
+    }
+    return mapping.get(workout_type, "workout")
+
+
+def build_activity_name(workout_row):
+    period = day_period_from_iso(workout_row.get("workout_date"))
+    label = workout_label(workout_row.get("workout_type"))
+    return f"{period.capitalize()} {label}".capitalize()
+
+
+def build_activity_description(workout_row):
+    details = []
+
+    duration = workout_row.get("duration_seconds")
+    if duration is not None:
+        details.append(f"Duration: {float(duration)/60:.1f} min")
+
+    distance = workout_row.get("total_distance_m")
+    if distance is not None and float(distance) > 0:
+        details.append(f"Distance: {float(distance)/1000:.2f} km")
+
+    calories = workout_row.get("total_calories")
+    if calories is not None:
+        details.append(f"Calories: {int(calories)}")
+
+    workout_id = workout_row.get("workout_id")
+    if workout_id is not None:
+        details.append(f"Workout ID: {int(workout_id)}")
+
+    details.append("Synced with custom sync")
+    return " | ".join(details)
+
+
+def should_upload_private(workout_row):
+    workout_type = workout_row.get("workout_type")
+    has_gps = int(workout_row.get("has_gps") or 0)
+    return workout_type == "cycling" and has_gps == 0
+
+
+def fetch_unsynced_workouts(connection):
+    cursor = connection.execute(
+        """
+        SELECT
+            workout_id,
+            workout_type,
+            workout_date,
+            duration_seconds,
+            total_distance_m,
+            total_calories,
+            has_gps,
+            fit_file_path
+        FROM workouts
+        WHERE strava_synced = 0
+        ORDER BY workout_id ASC
+        """
+    )
+
+    rows = []
+    columns = [column[0] for column in cursor.description]
+    for values in cursor.fetchall():
+        row = dict(zip(columns, values))
+        fit_file = row.get("fit_file_path")
+        if fit_file and Path(fit_file).exists():
+            rows.append(row)
+    return rows
+
+
 def update_sync_status(file_path, upload_result):
     sync_db_path = resolve_sync_db_path(SYNC_DB_LOCATION)
     if sync_db_path is None:
@@ -153,7 +257,7 @@ def check_access_token():
         return False
     return True
 
-def upload_to_strava(file_path, activity_name=None, activity_type=None, description=None):
+def upload_to_strava(file_path, activity_name=None, activity_type=None, description=None, is_private=False):
     """
     Upload a FIT file to Strava
     
@@ -198,7 +302,8 @@ def upload_to_strava(file_path, activity_name=None, activity_type=None, descript
         
         data = {
             'data_type': 'fit',
-            'activity_type': resolved_activity_type
+            'activity_type': resolved_activity_type,
+            'private': 1 if is_private else 0
         }
         
         if activity_name:
@@ -317,6 +422,64 @@ def upload_multiple_files(file_pattern, activity_type=None):
     
     return results
 
+
+def upload_pending_from_db(activity_type_override=None):
+    sync_db_path = resolve_sync_db_path(SYNC_DB_LOCATION)
+    if sync_db_path is None or not sync_db_path.exists():
+        print("Sync DB not found. Run analyze first to populate workouts.")
+        return []
+
+    connection = sqlite3.connect(sync_db_path)
+    pending = fetch_unsynced_workouts(connection)
+    connection.close()
+
+    if not pending:
+        print("No unsynced workouts found in DB.")
+        return []
+
+    print(f"Found {len(pending)} unsynced workout(s) in DB")
+    results = []
+
+    for workout_row in pending:
+        file_path = workout_row["fit_file_path"]
+        resolved_type = (
+            activity_type_override
+            or infer_activity_type_from_workout_type(workout_row.get("workout_type"))
+        )
+        is_private = should_upload_private(workout_row)
+        title = build_activity_name(workout_row)
+        description = build_activity_description(workout_row)
+
+        print(f"\nUploading workout_id={workout_row.get('workout_id')} from DB...")
+        print(f"Title: {title}")
+        print(f"Visibility: {'private' if is_private else 'public'}")
+
+        result = upload_to_strava(
+            file_path,
+            activity_name=title,
+            activity_type=resolved_type,
+            description=description,
+            is_private=is_private,
+        )
+        results.append({"file": file_path, "result": result})
+
+        if result:
+            time.sleep(2)
+
+    print("\n" + "="*60)
+    print("DB UPLOAD SUMMARY")
+    print("="*60)
+    successful = sum(1 for item in results if item["result"])
+    print(f"Successful: {successful}/{len(results)}")
+
+    for item in results:
+        status = "[OK]" if item["result"] else "[FAIL]"
+        print(f"{status} {item['file']}")
+        if item["result"]:
+            print(f"   -> {item['result']['url']}")
+
+    return results
+
 # ============================================================================
 # MAIN
 # ============================================================================
@@ -331,6 +494,7 @@ if __name__ == "__main__":
     parser.add_argument('--description', help='Activity description')
     parser.add_argument('--type', default=None, help='Activity type override (default: infer from file name)')
     parser.add_argument('--multiple', help='Upload multiple files matching pattern (e.g., "output/*.fit")')
+    parser.add_argument('--pending-db', action='store_true', help='Upload all unsynced workouts from sync DB')
     
     args = parser.parse_args()
     
@@ -338,12 +502,15 @@ if __name__ == "__main__":
     print("STRAVA FIT FILE UPLOADER")
     print("="*60)
     
-    if args.multiple:
+    if args.pending_db:
+        upload_pending_from_db(activity_type_override=args.type)
+    elif args.multiple:
         upload_multiple_files(args.multiple, activity_type=args.type)
     else:
         upload_to_strava(
             args.file,
             activity_name=args.name,
             activity_type=args.type,
-            description=args.description
+            description=args.description,
+            is_private=False,
         )
