@@ -145,7 +145,7 @@ def build_activity_description(workout_row):
     if workout_id is not None:
         details.append(f"Workout ID: {int(workout_id)}")
 
-    details.append("Synced with custom sync")
+    details.append("Synced with my custom syncing solution :)")
     return " | ".join(details)
 
 
