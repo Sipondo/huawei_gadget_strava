@@ -180,3 +180,4 @@ file_config.json
 raw/
 sessions/*.csv
 sessions/*.fit
+settings.json

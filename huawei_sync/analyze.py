@@ -1,7 +1,7 @@
 import json
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, Union
 
 sys.path.append(str(Path(__file__).resolve().parent))
 
@@ -55,7 +55,15 @@ def main() -> None:
 	fit_root.mkdir(parents=True, exist_ok=True)
 
 	workout_dirs = [path for path in workout_root.iterdir() if path.is_dir()]
-	workout_dirs.sort()
+
+	def workout_sort_key(path: Path) -> Tuple[int, Union[int, str]]:
+		name = path.name.strip()
+		if name.isdigit():
+			return (0, int(name))
+		return (1, name)
+
+	workout_dirs.sort(key=workout_sort_key)
+	workout_dirs.reverse()
 
 	if not workout_dirs:
 		print("No workout folders found.")

@@ -15,6 +15,10 @@ from fit_tool.profile.messages.session_message import SessionMessage
 from fit_tool.profile.profile_type import Activity, Event, EventType, Sport, SubSport
 
 
+MAX_REASONABLE_SPEED_MS = 30.0
+MAX_FIT_SPEED_MS = 65.535
+
+
 def parse_iso_timestamp(value: str) -> float:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
 
@@ -135,7 +139,18 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
         delta = haversine_m(prev["lat"], prev["lon"], cur["lat"], cur["lon"])
         dt = cur["timestamp"] - prev["timestamp"]
 
-        speeds.append(delta / dt if dt > 0 else 0.0)
+        if dt <= 0:
+            speeds.append(0.0)
+            distances.append(distances[-1])
+            continue
+
+        raw_speed = delta / dt
+        if raw_speed > MAX_REASONABLE_SPEED_MS:
+            speeds.append(0.0)
+            distances.append(distances[-1])
+            continue
+
+        speeds.append(raw_speed)
         distances.append(distances[-1] + delta)
 
     df_gpx["distance"] = distances
@@ -218,7 +233,8 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
         record.position_lat = to_semicircles(float(row["lat"]))
         record.position_long = to_semicircles(float(row["lon"]))
         record.distance = float(row["distance"])
-        record.speed = float(row["speed"])
+        safe_speed = max(0.0, min(float(row["speed"]), MAX_FIT_SPEED_MS))
+        record.speed = safe_speed
 
         if row.get("ele") is not None and not pd.isna(row.get("ele")):
             record.altitude = float(row["ele"])
