@@ -36,6 +36,47 @@ def load_config() -> dict:
 
 
 def detect_workout_type(workout_dir: Path) -> Optional[str]:
+	summary_path = workout_dir / "HUAWEI_WORKOUT_SUMMARY_SAMPLE.csv"
+	has_summary = summary_path.exists()
+	has_data = (workout_dir / "HUAWEI_WORKOUT_DATA_SAMPLE.csv").exists()
+
+	if has_summary:
+		try:
+			df_summary = pd.read_csv(summary_path)
+			workout_id = int(workout_dir.name) if workout_dir.name.isdigit() else None
+			if workout_id is not None and "WORKOUT_ID" in df_summary.columns:
+				df_summary = df_summary[df_summary["WORKOUT_ID"] == workout_id]
+
+			if not df_summary.empty and "TYPE" in df_summary.columns:
+				type_value = df_summary.iloc[0]["TYPE"]
+				type_text = str(type_value).strip().lower()
+
+				text_map = {
+					"swim": "swimming",
+					"swimming": "swimming",
+					"cycle": "cycling",
+					"cycling": "cycling",
+					"bike": "cycling",
+					"run": "indoor_running",
+					"indoor_run": "indoor_running",
+					"indoor running": "indoor_running",
+					"treadmill": "indoor_running",
+					"strength": "strength",
+					"workout": "strength",
+					"training": "strength",
+				}
+
+				for key, mapped_type in text_map.items():
+					if key in type_text:
+						return mapped_type
+
+				# Known numeric mapping observed from Huawei summary exports
+				if type_text in {"-116", "116"}:
+					return "cycling"
+		except Exception:
+			pass
+
+	# Fallback only when summary type is missing/unknown
 	swim_segments = workout_dir / "HUAWEI_WORKOUT_SWIM_SEGMENTS_SAMPLE.csv"
 	if swim_segments.exists():
 		return "swimming"
@@ -44,11 +85,9 @@ def detect_workout_type(workout_dir: Path) -> Optional[str]:
 	if gpx_matches:
 		return "cycling"
 
-	has_summary = (workout_dir / "HUAWEI_WORKOUT_SUMMARY_SAMPLE.csv").exists()
-	has_data = (workout_dir / "HUAWEI_WORKOUT_DATA_SAMPLE.csv").exists()
 	if has_summary and has_data:
 		try:
-			df_summary = pd.read_csv(workout_dir / "HUAWEI_WORKOUT_SUMMARY_SAMPLE.csv")
+			df_summary = pd.read_csv(summary_path)
 			df_data = pd.read_csv(workout_dir / "HUAWEI_WORKOUT_DATA_SAMPLE.csv")
 			workout_id = int(workout_dir.name) if workout_dir.name.isdigit() else None
 
