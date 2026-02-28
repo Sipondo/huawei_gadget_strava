@@ -3,6 +3,7 @@ import time
 import os
 import json
 import sqlite3
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -63,6 +64,27 @@ def parse_workout_id_from_path(file_path):
     stem = Path(file_path).stem
     workout_prefix = stem.split('_')[0]
     return int(workout_prefix) if workout_prefix.isdigit() else None
+
+
+def extract_duplicate_activity(error_text):
+    if not error_text:
+        return None
+
+    text = str(error_text)
+    lowered = text.lower()
+    if "duplicate" not in lowered:
+        return None
+
+    match = re.search(r"(?:https?://(?:www\.)?strava\.com)?/activities/(\d+)", text)
+    if not match:
+        return None
+
+    activity_id = int(match.group(1))
+    return {
+        "activity_id": activity_id,
+        "url": f"https://www.strava.com/activities/{activity_id}",
+        "duplicate": True,
+    }
 
 
 def infer_activity_type(file_path):
@@ -350,6 +372,11 @@ def upload_to_strava(file_path, activity_name=None, activity_type=None, descript
             print(f"Upload failed: {e}")
             if response is not None:
                 print(f"Response: {response.text}")
+                duplicate_result = extract_duplicate_activity(response.text)
+                if duplicate_result:
+                    print("Duplicate upload detected; marking as synced to existing Strava activity.")
+                    update_sync_status(file_path, duplicate_result)
+                    return duplicate_result
             return None
         except requests.exceptions.RequestException as e:
             print(f"Network error: {e}")
@@ -385,6 +412,12 @@ def upload_to_strava(file_path, activity_name=None, activity_type=None, descript
             
             if error:
                 print(f"Upload error: {error}")
+                duplicate_result = extract_duplicate_activity(error)
+                if duplicate_result:
+                    duplicate_result['upload_id'] = upload_id
+                    print("Duplicate upload detected; marking as synced to existing Strava activity.")
+                    update_sync_status(file_path, duplicate_result)
+                    return duplicate_result
                 return None
             
             if activity_id:
