@@ -185,7 +185,7 @@ def day_period_from_iso(iso_value):
 def workout_label(workout_type):
     mapping = {
         "swimming": "swim",
-        "cycling": "ride",
+        "cycling": "commute",
         "indoor_running": "run",
         "strength": "strength session",
     }
