@@ -555,7 +555,7 @@ def upload_pending_from_db(activity_type_override=None):
     results = []
     skipped = 0
 
-    for workout_row in pending:
+    for workout_row in pending[:1]:
         file_path = workout_row["fit_file_path"]
         workout_id = workout_row.get("workout_id")
 

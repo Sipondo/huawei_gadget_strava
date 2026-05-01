@@ -119,7 +119,7 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
         selected_columns.append("SPEED")
 
     df_data = df_data[selected_columns].copy()
-    df_data.loc[df_data["HEART_RATE"] < 0, "HEART_RATE"] += 255
+    df_data.loc[df_data["HEART_RATE"] < 0, "HEART_RATE"] += 256
     df_data = df_data[df_data["HEART_RATE"] > 0]
     df_data["TIMESTAMP"] = df_data["TIMESTAMP"].astype(float)
     df_data = df_data.sort_values("TIMESTAMP").reset_index(drop=True)

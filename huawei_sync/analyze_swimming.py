@@ -272,7 +272,8 @@ def analyze_workout(workout_dir: Path, output_dir: Path, pool_length: int) -> Pa
         )
         df_segment_data = add_sprint_rest_segments(df_segment_data)
 
-    df_heart_data["HEART_RATE"] = df_heart_data["HEART_RATE"].abs()
+    df_heart_data.loc[df_heart_data["HEART_RATE"] < 0, "HEART_RATE"] += 256
+    df_heart_data = df_heart_data[df_heart_data["HEART_RATE"] > 0]
     df_heart_data["SPEED_MS"] = df_heart_data["SPEED"] / 10.0
 
     start_timestamp = df_heart_data["TIMESTAMP"].min()

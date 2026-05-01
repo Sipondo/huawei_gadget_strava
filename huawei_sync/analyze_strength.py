@@ -43,7 +43,7 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
     summary = df_summary.iloc[0]
 
     df_data = df_data[["TIMESTAMP", "HEART_RATE"]].copy()
-    df_data.loc[df_data["HEART_RATE"] < 0, "HEART_RATE"] += 255
+    df_data.loc[df_data["HEART_RATE"] < 0, "HEART_RATE"] += 256
     df_data = df_data[df_data["HEART_RATE"] > 0]
     df_data = df_data.sort_values("TIMESTAMP").reset_index(drop=True)
 
