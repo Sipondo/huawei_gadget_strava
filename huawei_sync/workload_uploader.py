@@ -360,6 +360,11 @@ def check_access_token():
         return False
     return True
 
+class StravaRateLimitError(Exception):
+    """Exception raised when Strava API rate limit is exceeded."""
+    pass
+
+
 def mute_strava_activity(activity_id):
     """
     Mute an activity on Strava (hide from home feed)
@@ -379,9 +384,13 @@ def mute_strava_activity(activity_id):
     try:
         print(f"Muting activity {activity_id} (hiding from home feed)...")
         response = requests.put(url, headers=headers, json=data)
+        if response.status_code == 429:
+            raise StravaRateLimitError("Strava API rate limit exceeded during mute activity call.")
         response.raise_for_status()
         print(f"Activity {activity_id} muted successfully.")
         return True
+    except StravaRateLimitError:
+        raise
     except Exception as e:
         print(f"Warning: Failed to mute activity {activity_id}: {e}")
         return False
@@ -447,6 +456,8 @@ def upload_to_strava(file_path, activity_name=None, activity_type=None, descript
         # Make the upload request
         try:
             response = requests.post(upload_url, headers=headers, files=files, data=data)
+            if response.status_code == 429:
+                raise StravaRateLimitError("Strava API rate limit exceeded during upload.")
             response.raise_for_status()
         except requests.exceptions.HTTPError as e:
             print(f"Upload failed: {e}")
@@ -488,6 +499,8 @@ def upload_to_strava(file_path, activity_name=None, activity_type=None, descript
         
         try:
             status_response = requests.get(status_url, headers=headers)
+            if status_response.status_code == 429:
+                raise StravaRateLimitError("Strava API rate limit exceeded during status polling.")
             status_response.raise_for_status()
             status_data = status_response.json()
             
@@ -632,19 +645,24 @@ def upload_pending_from_db(activity_type_override=None):
         if is_commute:
             print("Flags: commute, mute")
 
-        result = upload_to_strava(
-            file_path,
-            activity_name=title,
-            activity_type=resolved_type,
-            description=description,
-            is_commute=is_commute,
-            is_mute=is_mute,
-        )
-        results.append({"file": file_path, "result": result})
+        try:
+            result = upload_to_strava(
+                file_path,
+                activity_name=title,
+                activity_type=resolved_type,
+                description=description,
+                is_commute=is_commute,
+                is_mute=is_mute,
+            )
+            results.append({"file": file_path, "result": result})
 
-        if result:
-            # Short pause between uploads
-            time.sleep(2)
+            if result:
+                # Short pause between uploads
+                time.sleep(2)
+        except StravaRateLimitError as e:
+            print(f"\nFATAL: {e}")
+            print("Stopping sync to respect Strava rate limits.")
+            break
 
     print("\n" + "="*60)
     print("DB UPLOAD SUMMARY")
