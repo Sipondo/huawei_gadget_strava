@@ -366,7 +366,14 @@ def main() -> None:
 
 		if workout_type == "swimming":
 			print(f"Analyzing swimming workout in {workout_dir}...")
-			fit_path = analyze_swimming(workout_dir, fit_root, pool_length=25)
+			summary = load_summary_row(workout_dir, workout_id)
+			pool_length_cm = as_int(summary.get("POOL_LENGTH", 2500))
+			pool_length = 25
+			if pool_length_cm and pool_length_cm > 0:
+				pool_length = pool_length_cm // 100
+			
+			print(f"  Pool length: {pool_length}m")
+			fit_path = analyze_swimming(workout_dir, fit_root, pool_length=pool_length)
 			upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
 			synced, url = get_sync_status(connection, workout_id)
 			print(f"  Sync status: {'synced' if synced else 'not synced'}")
