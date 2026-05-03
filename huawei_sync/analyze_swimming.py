@@ -295,14 +295,30 @@ def analyze_workout(workout_dir: Path, output_dir: Path, pool_length: int) -> Pa
 
     total_time = df_segment_data["TIME"].sum()
     total_distance = df_segment_data["DISTANCE"].sum()
+
+    # Check for "Practice Training" case
+    # Condition: pool length 20m and pace < 1500 meters per hour
+    is_practice_training = False
+    if pool_length == 20 and total_time > 0:
+        meters_per_hour = (total_distance / total_time) * 3600
+        if meters_per_hour < 1500:
+            is_practice_training = True
+            # Estimate total distance to 2000 meters per hour
+            total_distance = (total_time / 3600) * 2000
+            print(f"Detected practice training (Pace: {meters_per_hour:.0f}m/h).")
+            print(f"Estimating total distance at 2000m/h: {total_distance:.0f}m")
+
     total_strokes = df_segment_data["STROKES"].sum()
     avg_speed = total_distance / total_time if total_time > 0 else 0
     max_speed = 0
 
-    for _, row in df_segment_data.iterrows():
-        if row["TIME"] > 0:
-            segment_speed = row["DISTANCE"] / row["TIME"]
-            max_speed = max(max_speed, segment_speed)
+    if not is_practice_training:
+        for _, row in df_segment_data.iterrows():
+            if row["TIME"] > 0:
+                segment_speed = row["DISTANCE"] / row["TIME"]
+                max_speed = max(max_speed, segment_speed)
+    else:
+        max_speed = avg_speed
 
     avg_heart_rate = int(df_heart_data["HEART_RATE"].mean()) if not df_heart_data.empty else 0
     max_heart_rate = int(df_heart_data["HEART_RATE"].max()) if not df_heart_data.empty else 0
@@ -312,8 +328,9 @@ def analyze_workout(workout_dir: Path, output_dir: Path, pool_length: int) -> Pa
         calories = int(df_summary.iloc[0]["CALORIES"])
 
     print(f"Total time: {total_time:.1f}s ({total_time/60:.1f}min)")
-    print(f"Total distance: {total_distance}m")
-    print(f"Total strokes: {total_strokes}")
+    print(f"Total distance: {total_distance:.1f}m")
+    if not is_practice_training:
+        print(f"Total strokes: {total_strokes}")
     print(f"Avg speed: {avg_speed:.2f} m/s")
     print(f"Avg HR: {avg_heart_rate} bpm, Max HR: {max_heart_rate} bpm")
 
@@ -350,86 +367,96 @@ def analyze_workout(workout_dir: Path, output_dir: Path, pool_length: int) -> Pa
             # We omit speed for pool swimming as it confuses Strava
             builder.add(record)
 
-    print(
-        f"Adding {len(df_segment_data)} lengths/laps and {len(df_heart_data)} heart rate records..."
-    )
-
-    lap_hr_data = {}
-    for segment_idx, (_, row) in enumerate(df_segment_data.iterrows()):
-        segment_start = row["START_TIMESTAMP"]
-        segment_end = row["END_TIMESTAMP"]
-
-        segment_hr = df_heart_data[
-            (df_heart_data["TIMESTAMP"] >= segment_start)
-            & (df_heart_data["TIMESTAMP"] <= segment_end)
-        ]
-
-        if len(segment_hr) > 0:
-            lap_hr_data[segment_idx] = {
-                "avg": int(segment_hr["HEART_RATE"].mean()),
-                "max": int(segment_hr["HEART_RATE"].max()),
-                "min": int(segment_hr["HEART_RATE"].min()),
-            }
-        else:
-            lap_hr_data[segment_idx] = {
-                "avg": avg_heart_rate,
-                "max": max_heart_rate,
-                "min": 0,
-            }
-
-    for segment_idx, (_, row) in enumerate(df_segment_data.iterrows()):
-        # In swimming FIT, LengthMessage usually precedes the LapMessage it belongs to.
-        length = LengthMessage()
-        length.timestamp = int(row["END_TIMESTAMP"] * 1000)
-        length.start_time = int(row["START_TIMESTAMP"] * 1000)
-        length.total_elapsed_time = row["TIME"]
-        length.total_timer_time = row["TIME"]
-        length.total_strokes = int(row["STROKES"])
-
-        length_speed = row["DISTANCE"] / row["TIME"] if row["TIME"] > 0 else 0
-        length.avg_speed = length_speed
-        
-        # Detect stroke
-        stroke = SwimStroke.FREESTYLE
-        if "SWIM_TYPE" in row:
-            st_val = int(row["SWIM_TYPE"])
-            if st_val == 1: stroke = SwimStroke.BREASTSTROKE
-            elif st_val == 2: stroke = SwimStroke.FREESTYLE
-            elif st_val == 3: stroke = SwimStroke.BACKSTROKE
-            elif st_val == 4: stroke = SwimStroke.BUTTERFLY
-
-        length.swim_stroke = stroke
-
-        if row["TIME"] > 0:
-            length.avg_swimming_cadence = int((row["STROKES"] / row["TIME"]) * 60)
-        else:
-            length.avg_swimming_cadence = 0
-
-        length.length_type = 1 if row["DISTANCE"] > 0 else 0  # type: ignore[assignment]
-        length.event = Event.LENGTH
-        length.event_type = EventType.STOP
-        builder.add(length)
-
-        lap = LapMessage()
-        lap.timestamp = int(row["END_TIMESTAMP"] * 1000)
-        lap.start_time = int(row["START_TIMESTAMP"] * 1000)
-        lap.total_elapsed_time = row["TIME"]
-        lap.total_timer_time = row["TIME"]
-        lap.total_distance = row["DISTANCE"]
-
-        hr_stats = lap_hr_data.get(
-            segment_idx, {"avg": avg_heart_rate, "max": max_heart_rate, "min": 0}
+    if not is_practice_training:
+        print(
+            f"Adding {len(df_segment_data)} lengths/laps and {len(df_heart_data)} heart rate records..."
         )
-        lap.avg_heart_rate = hr_stats["avg"]
-        lap.max_heart_rate = hr_stats["max"]
 
-        lap.total_cycles = int(row["STROKES"])
-        lap_speed = row["DISTANCE"] / row["TIME"] if row["TIME"] > 0 else 0
-        lap.enhanced_avg_speed = lap_speed
-        lap.enhanced_max_speed = lap_speed
+        lap_hr_data = {}
+        for segment_idx, (_, row) in enumerate(df_segment_data.iterrows()):
+            segment_start = row["START_TIMESTAMP"]
+            segment_end = row["END_TIMESTAMP"]
+
+            segment_hr = df_heart_data[
+                (df_heart_data["TIMESTAMP"] >= segment_start)
+                & (df_heart_data["TIMESTAMP"] <= segment_end)
+            ]
+
+            if len(segment_hr) > 0:
+                lap_hr_data[segment_idx] = {
+                    "avg": int(segment_hr["HEART_RATE"].mean()),
+                    "max": int(segment_hr["HEART_RATE"].max()),
+                    "min": int(segment_hr["HEART_RATE"].min()),
+                }
+            else:
+                lap_hr_data[segment_idx] = {
+                    "avg": avg_heart_rate,
+                    "max": max_heart_rate,
+                    "min": 0,
+                }
+
+        for segment_idx, (_, row) in enumerate(df_segment_data.iterrows()):
+            # In swimming FIT, LengthMessage usually precedes the LapMessage it belongs to.
+            length = LengthMessage()
+            length.timestamp = int(row["END_TIMESTAMP"] * 1000)
+            length.start_time = int(row["START_TIMESTAMP"] * 1000)
+            length.total_elapsed_time = row["TIME"]
+            length.total_timer_time = row["TIME"]
+            length.total_strokes = int(row["STROKES"])
+
+            length_speed = row["DISTANCE"] / row["TIME"] if row["TIME"] > 0 else 0
+            length.avg_speed = length_speed
+            
+            # Stroke is always freestyle per user request
+            length.swim_stroke = SwimStroke.FREESTYLE
+
+            if row["TIME"] > 0:
+                length.avg_swimming_cadence = int((row["STROKES"] / row["TIME"]) * 60)
+            else:
+                length.avg_swimming_cadence = 0
+
+            length.length_type = 1 if row["DISTANCE"] > 0 else 0  # type: ignore[assignment]
+            length.event = Event.LENGTH
+            length.event_type = EventType.STOP
+            builder.add(length)
+
+            lap = LapMessage()
+            lap.timestamp = int(row["END_TIMESTAMP"] * 1000)
+            lap.start_time = int(row["START_TIMESTAMP"] * 1000)
+            lap.total_elapsed_time = row["TIME"]
+            lap.total_timer_time = row["TIME"]
+            lap.total_distance = row["DISTANCE"]
+
+            hr_stats = lap_hr_data.get(
+                segment_idx, {"avg": avg_heart_rate, "max": max_heart_rate, "min": 0}
+            )
+            lap.avg_heart_rate = hr_stats["avg"]
+            lap.max_heart_rate = hr_stats["max"]
+
+            lap.total_cycles = int(row["STROKES"])
+            lap_speed = row["DISTANCE"] / row["TIME"] if row["TIME"] > 0 else 0
+            lap.enhanced_avg_speed = lap_speed
+            lap.enhanced_max_speed = lap_speed
+            lap.event = Event.LAP
+            lap.event_type = EventType.STOP
+            lap.message_index = segment_idx
+            builder.add(lap)
+    else:
+        print("Practice training detected; skipping individual length/lap messages.")
+        # We still add one lap for the whole session to keep the FIT file structure valid
+        lap = LapMessage()
+        lap.timestamp = int((start_timestamp + total_time) * 1000)
+        lap.start_time = int(start_timestamp * 1000)
+        lap.total_elapsed_time = total_time
+        lap.total_timer_time = total_time
+        lap.total_distance = total_distance
+        lap.avg_heart_rate = avg_heart_rate
+        lap.max_heart_rate = max_heart_rate
+        lap.enhanced_avg_speed = avg_speed
+        lap.enhanced_max_speed = avg_speed
         lap.event = Event.LAP
         lap.event_type = EventType.STOP
-        lap.message_index = segment_idx
+        lap.message_index = 0
         builder.add(lap)
 
     session = SessionMessage()
