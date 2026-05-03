@@ -223,12 +223,14 @@ def build_activity_description(workout_row):
     return "\n".join(details)
 
 
-def should_upload_private(workout_row):
+def is_commute_workout(workout_row):
+    """Check if the workout should be marked as a commute"""
     workout_type = workout_row.get("workout_type")
     return workout_type == "cycling"
 
 
 def fetch_unsynced_workouts(connection):
+# ... (rest of fetch_unsynced_workouts unchanged)
     cursor = connection.execute(
         """
         SELECT
@@ -358,7 +360,34 @@ def check_access_token():
         return False
     return True
 
-def upload_to_strava(file_path, activity_name=None, activity_type=None, description=None, is_private=False):
+def mute_strava_activity(activity_id):
+    """
+    Mute an activity on Strava (hide from home feed)
+    Requires a separate PUT request after upload is processed.
+    """
+    if not STRAVA_ACCESS_TOKEN:
+        return False
+    
+    url = f"https://www.strava.com/api/v3/activities/{activity_id}"
+    headers = {
+        'Authorization': f'Bearer {STRAVA_ACCESS_TOKEN}',
+        'Content-Type': 'application/json'
+    }
+    # hide_from_home is the API parameter for "Mute Activity"
+    data = {'hide_from_home': True}
+    
+    try:
+        print(f"Muting activity {activity_id} (hiding from home feed)...")
+        response = requests.put(url, headers=headers, json=data)
+        response.raise_for_status()
+        print(f"Activity {activity_id} muted successfully.")
+        return True
+    except Exception as e:
+        print(f"Warning: Failed to mute activity {activity_id}: {e}")
+        return False
+
+
+def upload_to_strava(file_path, activity_name=None, activity_type=None, description=None, is_private=False, is_commute=False, is_mute=False):
     """
     Upload a FIT file to Strava
     
@@ -367,6 +396,9 @@ def upload_to_strava(file_path, activity_name=None, activity_type=None, descript
         activity_name: Optional name for the activity
         activity_type: Type of activity (if None, inferred from file name)
         description: Optional description
+        is_private: (Deprecated) Visibility follows user account defaults
+        is_commute: Mark as a commute
+        is_mute: Hide from home feed (requires an extra API call)
     
     Returns:
         Dictionary with upload result and activity ID
@@ -404,9 +436,7 @@ def upload_to_strava(file_path, activity_name=None, activity_type=None, descript
         data = {
             'data_type': 'fit',
             'activity_type': resolved_activity_type,
-            'private': 1 if is_private else 0,
-            'commute': 1 if is_private else 0
-
+            'commute': 1 if is_commute else 0
         }
         
         if activity_name:
@@ -426,6 +456,11 @@ def upload_to_strava(file_path, activity_name=None, activity_type=None, descript
                 if duplicate_result:
                     print("Duplicate upload detected; marking as synced to existing Strava activity.")
                     update_sync_status(file_path, duplicate_result)
+                    
+                    # Even for duplicates, we might want to mute it if requested
+                    if is_mute and duplicate_result.get('activity_id'):
+                        mute_strava_activity(duplicate_result['activity_id'])
+                        
                     return duplicate_result
             return None
         except requests.exceptions.RequestException as e:
@@ -467,6 +502,10 @@ def upload_to_strava(file_path, activity_name=None, activity_type=None, descript
                     duplicate_result['upload_id'] = upload_id
                     print("Duplicate upload detected; marking as synced to existing Strava activity.")
                     update_sync_status(file_path, duplicate_result)
+                    
+                    if is_mute and duplicate_result.get('activity_id'):
+                        mute_strava_activity(duplicate_result['activity_id'])
+                        
                     return duplicate_result
                 return None
             
@@ -474,6 +513,11 @@ def upload_to_strava(file_path, activity_name=None, activity_type=None, descript
                 print(f"\nUpload successful!")
                 print(f"Activity ID: {activity_id}")
                 print(f"View at: https://www.strava.com/activities/{activity_id}")
+                
+                # Mute the activity if requested
+                if is_mute:
+                    mute_strava_activity(activity_id)
+                
                 result = {
                     'upload_id': upload_id,
                     'activity_id': activity_id,
@@ -555,7 +599,7 @@ def upload_pending_from_db(activity_type_override=None):
     results = []
     skipped = 0
 
-    for workout_row in pending[:1]:
+    for workout_row in pending:
         file_path = workout_row["fit_file_path"]
         workout_id = workout_row.get("workout_id")
 
@@ -574,24 +618,32 @@ def upload_pending_from_db(activity_type_override=None):
             activity_type_override
             or infer_activity_type_from_workout_type(workout_row.get("workout_type"))
         )
-        is_private = should_upload_private(workout_row)
+        
+        # Commute and Mute logic
+        is_commute = is_commute_workout(workout_row)
+        is_mute = is_commute  # Per user request: mute the commutes
+        
         title = build_activity_name(workout_row)
         description = build_activity_description(workout_row)
 
         print(f"\nUploading workout_id={workout_row.get('workout_id')} from DB...")
         print(f"Title: {title}")
-        print(f"Visibility: {'private' if is_private else 'public'}")
+        print(f"Type: {resolved_type}")
+        if is_commute:
+            print("Flags: commute, mute")
 
         result = upload_to_strava(
             file_path,
             activity_name=title,
             activity_type=resolved_type,
             description=description,
-            is_private=is_private,
+            is_commute=is_commute,
+            is_mute=is_mute,
         )
         results.append({"file": file_path, "result": result})
 
         if result:
+            # Short pause between uploads
             time.sleep(2)
 
     print("\n" + "="*60)
@@ -628,6 +680,8 @@ if __name__ == "__main__":
     parser.add_argument('--type', default=None, help='Activity type override (default: infer from file name)')
     parser.add_argument('--multiple', help='Upload multiple files matching pattern (e.g., "output/*.fit")')
     parser.add_argument('--pending-db', action='store_true', help='Upload all unsynced workouts from sync DB')
+    parser.add_argument('--commute', action='store_true', help='Mark as commute')
+    parser.add_argument('--mute', action='store_true', help='Mute activity (hide from home feed)')
     
     args = parser.parse_args()
     
@@ -645,5 +699,6 @@ if __name__ == "__main__":
             activity_name=args.name,
             activity_type=args.type,
             description=args.description,
-            is_private=False,
+            is_commute=args.commute,
+            is_mute=args.mute,
         )
