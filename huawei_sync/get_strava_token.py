@@ -95,7 +95,8 @@ try:
         'client_secret': CLIENT_SECRET,
         'access_token': access_token,
         'refresh_token': refresh_token,
-        'expires_at': expires_at
+        'expires_at': expires_at,
+        'scope': token_data.get('scope', '')
     }
     
     with open('strava_config.json', 'w') as f:
