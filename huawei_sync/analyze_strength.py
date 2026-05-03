@@ -43,12 +43,21 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
     summary = df_summary.iloc[0]
 
     df_data = df_data[["TIMESTAMP", "HEART_RATE"]].copy()
+    df_data["TIMESTAMP"] = df_data["TIMESTAMP"].astype(float)
+    df_data = df_data[df_data["TIMESTAMP"] > 631065600]
     df_data.loc[df_data["HEART_RATE"] < 0, "HEART_RATE"] += 256
     df_data = df_data[df_data["HEART_RATE"] > 0]
     df_data = df_data.sort_values("TIMESTAMP").reset_index(drop=True)
 
-    start_timestamp = int(summary["START_TIMESTAMP"]) if "START_TIMESTAMP" in summary else None
-    end_timestamp = int(summary["END_TIMESTAMP"]) if "END_TIMESTAMP" in summary else None
+    MIN_FIT_TIMESTAMP = 631065600
+
+    def get_valid_ts(val, fallback):
+        if pd.isna(val) or float(val) <= MIN_FIT_TIMESTAMP:
+            return fallback
+        return int(val)
+
+    start_timestamp = get_valid_ts(summary.get("START_TIMESTAMP"), None)
+    end_timestamp = get_valid_ts(summary.get("END_TIMESTAMP"), None)
 
     if start_timestamp is None and not df_data.empty:
         start_timestamp = int(df_data["TIMESTAMP"].min())

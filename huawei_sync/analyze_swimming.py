@@ -276,8 +276,13 @@ def analyze_workout(workout_dir: Path, output_dir: Path, pool_length: int) -> Pa
 
     df_heart_data.loc[df_heart_data["HEART_RATE"] < 0, "HEART_RATE"] += 256
     df_heart_data = df_heart_data[df_heart_data["HEART_RATE"] > 0]
+    df_heart_data["TIMESTAMP"] = df_heart_data["TIMESTAMP"].astype(float)
+    df_heart_data = df_heart_data[df_heart_data["TIMESTAMP"] > 631065600]
     # speed in heart data is often unreliable for pool swimming; we'll rely on lengths
     df_heart_data["SPEED_MS"] = df_heart_data["SPEED"] / 10.0
+
+    if df_heart_data.empty:
+        raise ValueError("No valid heart rate records found for swimming workout.")
 
     start_timestamp = df_heart_data["TIMESTAMP"].min()
 

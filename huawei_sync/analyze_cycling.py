@@ -122,6 +122,7 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
     df_data.loc[df_data["HEART_RATE"] < 0, "HEART_RATE"] += 256
     df_data = df_data[df_data["HEART_RATE"] > 0]
     df_data["TIMESTAMP"] = df_data["TIMESTAMP"].astype(float)
+    df_data = df_data[df_data["TIMESTAMP"] > 631065600]
     df_data = df_data.sort_values("TIMESTAMP").reset_index(drop=True)
 
     if "SPEED" in df_data.columns:
@@ -136,45 +137,51 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
 
     if has_gpx:
         df_gpx = parse_gpx_points(cast(Path, gpx_fname))
+        df_gpx = df_gpx[df_gpx["timestamp"] > 631065600]
 
-        distances = [0.0]
-        speeds = [0.0]
+        if df_gpx.empty:
+            print("Warning: GPX found but contains no valid track points after 1989. Falling back to sensor-only reconstruction.")
+            has_gpx = False
+        else:
+            distances = [0.0]
+            speeds = [0.0]
 
-        for idx in range(1, len(df_gpx)):
-            prev = df_gpx.iloc[idx - 1]
-            cur = df_gpx.iloc[idx]
-            delta = haversine_m(prev["lat"], prev["lon"], cur["lat"], cur["lon"])
-            dt = cur["timestamp"] - prev["timestamp"]
+            for idx in range(1, len(df_gpx)):
+                prev = df_gpx.iloc[idx - 1]
+                cur = df_gpx.iloc[idx]
+                delta = haversine_m(prev["lat"], prev["lon"], cur["lat"], cur["lon"])
+                dt = cur["timestamp"] - prev["timestamp"]
 
-            if dt <= 0:
-                speeds.append(0.0)
-                distances.append(distances[-1])
-                continue
+                if dt <= 0:
+                    speeds.append(0.0)
+                    distances.append(distances[-1])
+                    continue
 
-            raw_speed = delta / dt
-            if raw_speed > MAX_REASONABLE_SPEED_MS:
-                speeds.append(0.0)
-                distances.append(distances[-1])
-                continue
+                raw_speed = delta / dt
+                if raw_speed > MAX_REASONABLE_SPEED_MS:
+                    speeds.append(0.0)
+                    distances.append(distances[-1])
+                    continue
 
-            speeds.append(raw_speed)
-            distances.append(distances[-1] + delta)
+                speeds.append(raw_speed)
+                distances.append(distances[-1] + delta)
 
-        df_gpx["distance"] = distances
-        df_gpx["speed"] = speeds
+            df_gpx["distance"] = distances
+            df_gpx["speed"] = speeds
 
-        if not df_data.empty:
-            df_gpx = pd.merge_asof(
-                df_gpx,
-                df_data,
-                left_on="timestamp",
-                right_on="TIMESTAMP",
-                direction="nearest",
-                tolerance=5,
-            )
+            if not df_data.empty:
+                df_gpx = pd.merge_asof(
+                    df_gpx,
+                    df_data,
+                    left_on="timestamp",
+                    right_on="TIMESTAMP",
+                    direction="nearest",
+                    tolerance=5,
+                )
 
-        df_track = df_gpx
-    else:
+            df_track = df_gpx
+
+    if not has_gpx:
         print("No GPX found; using sensor-only cycling reconstruction.")
 
         if df_data.empty:
@@ -197,13 +204,20 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
             }
         )
 
-        derived_distance = float(df_track["distance"].iloc[-1]) if not df_track.empty else 0.0
-        if summary_distance > 0 and derived_distance > 0:
-            scale = summary_distance / derived_distance
-            df_track["distance"] = df_track["distance"] * scale
+    derived_distance = float(df_track["distance"].iloc[-1]) if not df_track.empty else 0.0
+    if summary_distance > 0 and derived_distance > 0:
+        scale = summary_distance / derived_distance
+        df_track["distance"] = df_track["distance"] * scale
 
-    start_timestamp = int(df_summary.get("START_TIMESTAMP", df_track["timestamp"].iloc[0]))
-    end_timestamp = int(df_summary.get("END_TIMESTAMP", df_track["timestamp"].iloc[-1]))
+    MIN_FIT_TIMESTAMP = 631065600
+
+    def get_valid_ts(val, fallback):
+        if pd.isna(val) or float(val) <= MIN_FIT_TIMESTAMP:
+            return fallback
+        return int(val)
+
+    start_timestamp = get_valid_ts(df_summary.get("START_TIMESTAMP"), int(df_track["timestamp"].iloc[0]))
+    end_timestamp = get_valid_ts(df_summary.get("END_TIMESTAMP"), int(df_track["timestamp"].iloc[-1]))
     total_time = max(end_timestamp - start_timestamp, 1)
     total_distance = float(df_track["distance"].iloc[-1]) if not df_track.empty else 0.0
     if summary_distance > 0:

@@ -15,6 +15,7 @@ from analyze_indoor_cycling import analyze_workout as analyze_indoor_cycling
 from analyze_indoor_running import analyze_workout as analyze_indoor_running
 from analyze_strength import analyze_workout as analyze_strength
 from analyze_swimming import analyze_workout as analyze_swimming
+from delete_strava_workouts import run_delete_mode as run_strava_delete_mode
 
 
 CONFIG_FILE_NAME = "file_config.json"
@@ -306,7 +307,16 @@ def main() -> None:
 		action="store_true",
 		help="Force re-analyzing workouts even if FIT file is already tracked and exists.",
 	)
+	parser.add_argument(
+		"--delete-mode",
+		action="store_true",
+		help="Check Strava for deleted activities and update the local database.",
+	)
 	args = parser.parse_args()
+
+	if args.delete_mode:
+		run_strava_delete_mode()
+		return
 
 	config = load_config()
 	workout_location = config.get("workout_location", "")
@@ -364,61 +374,66 @@ def main() -> None:
 			continue
 		fit_path: Optional[Path] = None
 
-		if workout_type == "swimming":
-			print(f"Analyzing swimming workout in {workout_dir}...")
-			summary = load_summary_row(workout_dir, workout_id)
-			pool_length_cm = as_int(summary.get("POOL_LENGTH", 2500))
-			pool_length = 25
-			if pool_length_cm and pool_length_cm > 0:
-				pool_length = pool_length_cm // 100
-			
-			print(f"  Pool length: {pool_length}m")
-			fit_path = analyze_swimming(workout_dir, fit_root, pool_length=pool_length)
-			upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
-			synced, url = get_sync_status(connection, workout_id)
-			print(f"  Sync status: {'synced' if synced else 'not synced'}")
-			if url:
-				print(f"  Strava URL: {url}")
-			continue
+		try:
+			if workout_type == "swimming":
+				print(f"Analyzing swimming workout in {workout_dir}...")
+				summary = load_summary_row(workout_dir, workout_id)
+				pool_length_cm = as_int(summary.get("POOL_LENGTH", 2500))
+				pool_length = 25
+				if pool_length_cm and pool_length_cm > 0:
+					pool_length = pool_length_cm // 100
+				
+				print(f"  Pool length: {pool_length}m")
+				fit_path = analyze_swimming(workout_dir, fit_root, pool_length=pool_length)
+				upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
+				synced, url = get_sync_status(connection, workout_id)
+				print(f"  Sync status: {'synced' if synced else 'not synced'}")
+				if url:
+					print(f"  Strava URL: {url}")
+				continue
 
-		if workout_type == "cycling":
-			print(f"Analyzing cycling workout in {workout_dir}...")
-			fit_path = analyze_cycling(workout_dir, fit_root)
-			upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
-			synced, url = get_sync_status(connection, workout_id)
-			print(f"  Sync status: {'synced' if synced else 'not synced'}")
-			if url:
-				print(f"  Strava URL: {url}")
-			continue
+			if workout_type == "cycling":
+				print(f"Analyzing cycling workout in {workout_dir}...")
+				fit_path = analyze_cycling(workout_dir, fit_root)
+				upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
+				synced, url = get_sync_status(connection, workout_id)
+				print(f"  Sync status: {'synced' if synced else 'not synced'}")
+				if url:
+					print(f"  Strava URL: {url}")
+				continue
 
-		if workout_type == "indoor_cycling":
-			print(f"Analyzing indoor cycling workout in {workout_dir}...")
-			fit_path = analyze_indoor_cycling(workout_dir, fit_root)
-			upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
-			synced, url = get_sync_status(connection, workout_id)
-			print(f"  Sync status: {'synced' if synced else 'not synced'}")
-			if url:
-				print(f"  Strava URL: {url}")
-			continue
+			if workout_type == "indoor_cycling":
+				print(f"Analyzing indoor cycling workout in {workout_dir}...")
+				fit_path = analyze_indoor_cycling(workout_dir, fit_root)
+				upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
+				synced, url = get_sync_status(connection, workout_id)
+				print(f"  Sync status: {'synced' if synced else 'not synced'}")
+				if url:
+					print(f"  Strava URL: {url}")
+				continue
 
-		if workout_type == "strength":
-			print(f"Analyzing strength workout in {workout_dir}...")
-			fit_path = analyze_strength(workout_dir, fit_root)
-			upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
-			synced, url = get_sync_status(connection, workout_id)
-			print(f"  Sync status: {'synced' if synced else 'not synced'}")
-			if url:
-				print(f"  Strava URL: {url}")
-			continue
+			if workout_type == "strength":
+				print(f"Analyzing strength workout in {workout_dir}...")
+				fit_path = analyze_strength(workout_dir, fit_root)
+				upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
+				synced, url = get_sync_status(connection, workout_id)
+				print(f"  Sync status: {'synced' if synced else 'not synced'}")
+				if url:
+					print(f"  Strava URL: {url}")
+				continue
 
-		if workout_type == "indoor_running":
-			print(f"Analyzing indoor running workout in {workout_dir}...")
-			fit_path = analyze_indoor_running(workout_dir, fit_root)
-			upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
-			synced, url = get_sync_status(connection, workout_id)
-			print(f"  Sync status: {'synced' if synced else 'not synced'}")
-			if url:
-				print(f"  Strava URL: {url}")
+			if workout_type == "indoor_running":
+				print(f"Analyzing indoor running workout in {workout_dir}...")
+				fit_path = analyze_indoor_running(workout_dir, fit_root)
+				upsert_workout_row(connection, workout_id, workout_dir, workout_type, fit_path)
+				synced, url = get_sync_status(connection, workout_id)
+				print(f"  Sync status: {'synced' if synced else 'not synced'}")
+				if url:
+					print(f"  Strava URL: {url}")
+				continue
+		except Exception as e:
+			print(f"Error analyzing workout {workout_id}: {e}")
+			print("Skipping this workout.")
 			continue
 
 		print(f"Skipping {workout_dir}: no recognizable workout files.")

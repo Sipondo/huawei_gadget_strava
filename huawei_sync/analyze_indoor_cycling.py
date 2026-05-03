@@ -51,6 +51,8 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
             raise ValueError(f"Missing required cycling data column: {column_name}")
 
     df_data = df_data[required_columns].copy()
+    df_data["TIMESTAMP"] = df_data["TIMESTAMP"].astype(float)
+    df_data = df_data[df_data["TIMESTAMP"] > 631065600]
     df_data = df_data.sort_values("TIMESTAMP").reset_index(drop=True)
     df_data.loc[df_data["HEART_RATE"] < 0, "HEART_RATE"] += 256
     df_data = df_data[df_data["HEART_RATE"] > 0]
@@ -60,14 +62,20 @@ def analyze_workout(workout_dir: Path, output_dir: Path) -> Path:
     if df_data.empty:
         raise ValueError("No valid heart-rate records found for indoor cycling workout.")
 
-    start_timestamp = int(summary["START_TIMESTAMP"]) if "START_TIMESTAMP" in summary else int(df_data["TIMESTAMP"].min())
-    end_timestamp = int(summary["END_TIMESTAMP"]) if "END_TIMESTAMP" in summary else int(df_data["TIMESTAMP"].max())
+    MIN_FIT_TIMESTAMP = 631065600
+
+    def get_valid_ts(val, fallback):
+        if pd.isna(val) or float(val) <= MIN_FIT_TIMESTAMP:
+            return fallback
+        return int(val)
+
+    start_timestamp = get_valid_ts(summary.get("START_TIMESTAMP"), int(df_data["TIMESTAMP"].min()))
+    end_timestamp = get_valid_ts(summary.get("END_TIMESTAMP"), int(df_data["TIMESTAMP"].max()))
     total_time = max(1, end_timestamp - start_timestamp)
 
     summary_distance = float(summary.get("DISTANCE", 0.0) or 0.0)
     total_calories = int(summary.get("CALORIES", 0) or 0)
 
-    df_data["TIMESTAMP"] = df_data["TIMESTAMP"].astype(float)
     cumulative_distance = [0.0]
     for idx in range(1, len(df_data)):
         prev_ts = float(df_data.iloc[idx - 1]["TIMESTAMP"])
